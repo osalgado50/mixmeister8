@@ -45,6 +45,7 @@ final class Session {
     }
 
     func newPlaylist() {
+        Player.shared.stop()
         engineDoc = EngineDocument()
         doc = PLDocument(format: "mmp", version: nil, master_gain_db: 0, master_effects: [], tracks: [])
         path = nil
@@ -57,6 +58,7 @@ final class Session {
     func open(_ p: String) throws {
         let e = try EngineDocument(path: p)
         let d = try e.read()
+        Player.shared.stop()
         engineDoc = e
         doc = d
         path = p
@@ -101,6 +103,8 @@ final class Session {
 
     func relayout() {
         layout = MixLayout(doc: doc, strips: strips)
+        // Si está sonando, la mezcla nueva sigue sonando desde el mismo punto.
+        if Player.shared.isPlaying { DispatchQueue.main.async { Player.shared.play(from: Player.shared.position) } }
         NotificationCenter.default.post(name: .playlistChanged, object: nil)
         for (i, r) in resolved.enumerated() { if let r { Waveforms.shared.request(r, track: i) } }
     }

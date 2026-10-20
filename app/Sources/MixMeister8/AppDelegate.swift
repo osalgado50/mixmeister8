@@ -21,6 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         NSApp.appearance = NSAppearance(named: .darkAqua)
         buildMenus()
         buildWindow()
+        playlist.stopButton.target = self
         playlist.table.target = self
         playlist.table.doubleAction = #selector(playFromPlaylistRow(_:))
         session.loadLibrary()
@@ -81,6 +82,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         if let cols = main.items.first(where: { $0.title == "Library" })?.submenu?.items.first(where: { $0.title == "Columns" })?.submenu {
             for it in cols.items { it.target = library }
         }
+        // «stop:» existe en NSApplication (detiene la app): Playback › Stop va directo al reproductor.
+        func retarget(_ m: NSMenu) {
+            for it in m.items {
+                if it.action == NSSelectorFromString("stop:") { it.target = self }
+                if let sub = it.submenu { retarget(sub) }
+            }
+        }
+        retarget(main)
         // Open Recent Playlist y Tools › Transitions se rellenan al abrirse.
         recentMenu?.delegate = self
         transitionsMenu?.delegate = self
@@ -332,7 +341,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     // MARK: Playback
 
     var player: Player { .shared }
-    @objc func playPause(_ s: Any?) { player.toggle(from: timelinePane.timeline.playhead) }
+    @objc func playPause(_ s: Any?) {
+        Log.write("Play/Pause (sonando=\(player.isPlaying), cursor \(String(format: "%.2f", timelinePane.timeline.playhead)))")
+        player.toggle(from: timelinePane.timeline.playhead)
+    }
     @objc func stop(_ s: Any?) { player.stop() }
     @objc func jogForward(_ s: Any?) { player.seek(player.position + 5) }
     @objc func jogBackward(_ s: Any?) { player.seek(max(0, player.position - 5)) }

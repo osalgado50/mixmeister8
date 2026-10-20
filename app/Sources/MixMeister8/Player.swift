@@ -13,6 +13,16 @@ extension Notification.Name {
 /// bandas → mezclador. Los segmentos se programan en el instante de la mezcla que les da
 /// MixLayout; la envolvente de volumen (marcadores automáticos y manuales) y los marcadores de
 /// graves/medios/agudos se aplican 60 veces por segundo según la posición de cada pista.
+/// Registro de diagnóstico: ~/Library/Logs/MixMeister 8.log
+enum Log {
+    static let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/MixMeister 8.log")
+    static func write(_ s: String) {
+        let line = "\(Date()) \(s)\n"
+        if let h = try? FileHandle(forWritingTo: url) { h.seekToEndOfFile(); h.write(Data(line.utf8)); try? h.close() }
+        else { try? line.write(to: url, atomically: true, encoding: .utf8) }
+    }
+}
+
 final class Player {
     static let shared = Player()
 
@@ -42,7 +52,9 @@ final class Player {
     var position: Double {
         guard isPlaying else { return pausedAt }
         let now = mach_absolute_time()
-        return startMix + Double(now &- startHost) * Self.ticksToSeconds
+        // El sonido arranca unos ms en el futuro (startHost): hasta entonces, la posición es la de salida.
+        guard now > startHost else { return startMix }
+        return startMix + Double(now - startHost) * Self.ticksToSeconds
     }
     private static let ticksToSeconds: Double = {
         var tb = mach_timebase_info_data_t()
@@ -71,12 +83,14 @@ final class Player {
         let wasPlaying = isPlaying, at = position
         if wasPlaying { stopNodes() }
         engine.stop()
-        if let dev = OutputConfig.main(), let au = engine.outputNode.audioUnit {
-            var id = dev.id
-            let rc = AudioUnitSetProperty(au, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &id, UInt32(MemoryLayout<AudioDeviceID>.size))
-            NSLog("MixMeister 8: salida «\(dev.name)» (\(rc == noErr ? "ok" : "error \(rc)"))")
-        }
+        setDevice()
         if wasPlaying { play(from: at) }
+    }
+
+    private func setDevice() {
+        guard let dev = OutputConfig.main(), let au = engine.outputNode.audioUnit else { return }
+        var id = dev.id
+        AudioUnitSetProperty(au, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &id, UInt32(MemoryLayout<AudioDeviceID>.size))
     }
     var outputName: String { OutputConfig.main()?.name ?? "—" }
 
@@ -115,8 +129,11 @@ final class Player {
             for k in 0..<3 { b[k].gain = 0 }
             chains.append(c)
         }
+        Log.write("play desde \(String(format: "%.2f", from)) s: \(chains.count) pistas con audio de \(L.items.count); motor en marcha=\(engine.isRunning)")
         guard !chains.isEmpty else { pausedAt = from; return }
-        do { if !engine.isRunning { try engine.start() } } catch { NSLog("MixMeister 8: audio: \(error)"); return }
+        setDevice()
+        engine.prepare()
+        do { try engine.start() } catch { Log.write("ERROR al arrancar el audio: \(error)"); stopNodes(); return }
 
         // Programación: el tiempo del reproductor corre a `rate` veces el tiempo real.
         for c in chains {
@@ -136,6 +153,7 @@ final class Player {
         let at = AVAudioTime(hostTime: host)
         applyEnvelopes(at: from)
         for c in chains { c.player.play(at: at) }
+        Log.write("sonando: \(chains.map { "\($0.index + 1)" }.joined(separator: ",")) · salida \(outputName)")
         startHost = host
         startMix = from
         isPlaying = true
@@ -146,6 +164,7 @@ final class Player {
     }
 
     func pause() {
+        Log.write("pausa en \(String(format: "%.2f", position))")
         pausedAt = position
         stopNodes()
         NotificationCenter.default.post(name: .playerState, object: nil)
@@ -153,6 +172,7 @@ final class Player {
     }
 
     func stop() {
+        Log.write("stop")
         stopNodes()
         pausedAt = 0
         NotificationCenter.default.post(name: .playerState, object: nil)
@@ -172,13 +192,17 @@ final class Player {
             engine.detach(c.player); engine.detach(c.pitch); engine.detach(c.eq)
         }
         chains.removeAll()
+        // El motor se para siempre: con el motor en marcha, los reproductores recién conectados
+        // no arrancan (la segunda reproducción quedaba muda). En play() se vuelve a arrancar.
+        engine.stop()
+        engine.reset()
         isPlaying = false
         peakL = 0; peakR = 0
     }
 
     private func tick() {
         let p = position
-        if p >= Session.shared.layout.total + 0.5 { stop(); return }
+        if p >= Session.shared.layout.total + 0.5 { Log.write("fin de la mezcla"); stop(); return }
         applyEnvelopes(at: p)
         NotificationCenter.default.post(name: .playerTick, object: nil)
     }

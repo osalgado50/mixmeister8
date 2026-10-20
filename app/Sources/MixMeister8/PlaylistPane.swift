@@ -12,6 +12,9 @@ final class PlaylistPane: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
     let table = NSTableView()
     private let scroll = NSScrollView()
     private var visible: [(key: String, width: CGFloat)] = []
+    /// «stop:» también es una acción de NSApplication (para la app entera): este botón va siempre
+    /// dirigido al reproductor (AppDelegate.stop), nunca por la cadena de respuesta.
+    let stopButton = ToolButton(symbol: "stop.fill", tip: "Stop", action: NSSelectorFromString("stop:"), size: 13)
     private let playButton = ToolButton(symbol: "play.fill", tip: "Play/Pause", action: NSSelectorFromString("playPause:"), size: 14)
 
     override init(frame: NSRect) {
@@ -23,7 +26,7 @@ final class PlaylistPane: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
         bar.translatesAutoresizingMaskIntoConstraints = false
         let buttons: [NSView] = [
             playButton,
-            ToolButton(symbol: "stop.fill", tip: "Stop", action: NSSelectorFromString("stop:"), size: 13),
+            stopButton,
             ToolButton(symbol: "backward.end.fill", tip: "Previous Track", action: NSSelectorFromString("previousTrack:")),
             ToolButton(symbol: "forward.end.fill", tip: "Next Track", action: NSSelectorFromString("nextTrack:")),
             ToolButton(symbol: "arrow.triangle.merge", tip: "Mix Now (F6)", action: NSSelectorFromString("mixNow:")),
