@@ -21,6 +21,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         NSApp.appearance = NSAppearance(named: .darkAqua)
         buildMenus()
         buildWindow()
+        playlist.table.target = self
+        playlist.table.doubleAction = #selector(playFromPlaylistRow(_:))
         session.loadLibrary()
         session.newPlaylist()
         if let last = RecentFiles.list.first, FileManager.default.fileExists(atPath: last), CommandLine.arguments.count < 2 {
@@ -31,6 +33,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         NotificationCenter.default.addObserver(forName: .playlistChanged, object: nil, queue: .main) { [weak self] _ in self?.updateTitle() }
         // Verificación sin pantalla: MixMeister8 --snapshot salida.png [lista.mmp] [--select N] [--zoom Z]
         let args = CommandLine.arguments
+        // Prueba de audio: MixMeister8 lista.mmp --playtest INSTANTE  (suena 4 s y anota niveles)
+        if let i = args.firstIndex(of: "--playtest"), i + 1 < args.count, let t0 = Double(args[i + 1]) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                Player.shared.play(from: t0)
+                var n = 0
+                Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { tm in
+                    let p = Player.shared
+                    print(String(format: "PLAYTEST pos=%.2f playing=%d L=%.3f R=%.3f chains_ok", p.position, p.isPlaying ? 1 : 0, p.peakL, p.peakR))
+                    fflush(stdout)
+                    n += 1
+                    if n >= 8 { tm.invalidate(); p.stop(); NSApp.terminate(nil) }
+                }
+            }
+        }
         if let i = args.firstIndex(of: "--snapshot"), i + 1 < args.count {
             if let j = args.firstIndex(of: "--select"), j + 1 < args.count, let n = Int(args[j + 1]) { session.selectedTrack = n }
             if let j = args.firstIndex(of: "--zoom"), j + 1 < args.count, let z = Double(args[j + 1]) { timelinePane.zoom(by: z) }
@@ -178,7 +194,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         case "savePlayList:", "savePlayListAs:": return !session.doc.tracks.isEmpty || session.path != nil
         case "delete:", "del:", "tweaks:", "adjustTrackSettings:", "editTag:":
             return session.selectedTrack != nil && (sel == "delete:" || sel == "del:")
-        case "addToEndOfPlaylist:": return !library.selectedItems.isEmpty
+        case "addToEndOfPlaylist:", "catPreviewPlay:": return !library.selectedItems.isEmpty
+        case "catPreviewStop:": return player.isPreviewing
+        case "playPause:", "jogForward:", "jogBackward:", "previousTrack:", "nextTrack:", "mixNow:":
+            return !session.doc.tracks.isEmpty
+        case "stop:": return player.isPlaying || player.position > 0
         case "undo:": return session.undo.canUndo
         case "redo:": return session.undo.canRedo
         case "clearRecentFiles:": return !RecentFiles.list.isEmpty
@@ -307,6 +327,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                 }
             }
         }
+    }
+
+    // MARK: Playback
+
+    var player: Player { .shared }
+    @objc func playPause(_ s: Any?) { player.toggle(from: timelinePane.timeline.playhead) }
+    @objc func stop(_ s: Any?) { player.stop() }
+    @objc func jogForward(_ s: Any?) { player.seek(player.position + 5) }
+    @objc func jogBackward(_ s: Any?) { player.seek(max(0, player.position - 5)) }
+    private var trackStarts: [Double] { session.layout.items.filter { !$0.overlay }.map(\.mixStart).sorted() }
+    @objc func previousTrack(_ s: Any?) {
+        let p = player.position
+        player.seek(trackStarts.last { $0 < p - 1.5 } ?? 0)
+    }
+    @objc func nextTrack(_ s: Any?) {
+        let p = player.position
+        if let n = trackStarts.first(where: { $0 > p + 0.05 }) { player.seek(n) }
+    }
+    /// Mix Now (F6): salta al ancla de salida de la pista que suena, donde empieza la transición.
+    @objc func mixNow(_ s: Any?) {
+        let p = player.position
+        let L = session.layout
+        guard let cur = L.items.last(where: { !$0.overlay && $0.mixStart <= p }), cur.index < session.doc.tracks.count,
+              let outro = session.doc.tracks[cur.index].markers(MarkerKind.outroAnchor).first else { return }
+        let t = cur.toMix(Double(outro.pos_us) * 1e-6)
+        if t > p { player.seek(t) }
+    }
+    @objc func catPreviewPlay(_ s: Any?) {
+        guard let it = library.selectedItems.first else { return }
+        player.previewPlay(path: it.path)
+    }
+    @objc func catPreviewStop(_ s: Any?) { player.previewStop() }
+    /// Doble clic en la lista: suena desde el principio de esa pista.
+    @objc func playFromPlaylistRow(_ s: Any?) {
+        let r = playlist.table.clickedRow
+        guard r >= 0, let it = session.layout.items.first(where: { $0.index == r }) else { return }
+        session.selectedTrack = r
+        player.play(from: it.mixStart)
     }
 
     // MARK: View

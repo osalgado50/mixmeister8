@@ -229,10 +229,12 @@ final class TimelineView: NSView {
     override func mouseDown(with e: NSEvent) {
         window?.makeFirstResponder(self)
         let p = convert(e.locationInWindow, from: nil)
-        if p.y < Self.rulerHeight { playhead = max(0, time(p.x)); return }
-        let hit = trackRects.last { $0.rect.contains(p) }
-        Session.shared.selectedTrack = hit?.index
+        if p.y >= Self.rulerHeight {
+            let hit = trackRects.last { $0.rect.contains(p) }
+            Session.shared.selectedTrack = hit?.index
+        }
         playhead = max(0, time(p.x))
+        Player.shared.seek(playhead)
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
@@ -244,6 +246,11 @@ final class TimelineView: NSView {
             return MenuSpecs.timelineTrack.build()
         }
         return MenuSpecs.timelineStrips.build()
+    }
+
+    override func keyDown(with e: NSEvent) {
+        if e.charactersIgnoringModifiers == " " { Player.shared.toggle(from: playhead); return }
+        super.keyDown(with: e)
     }
 
     override func scrollWheel(with e: NSEvent) {

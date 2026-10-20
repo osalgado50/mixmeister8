@@ -12,6 +12,7 @@ final class PlaylistPane: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
     let table = NSTableView()
     private let scroll = NSScrollView()
     private var visible: [(key: String, width: CGFloat)] = []
+    private let playButton = ToolButton(symbol: "play.fill", tip: "Play/Pause", action: NSSelectorFromString("playPause:"), size: 14)
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -21,7 +22,7 @@ final class PlaylistPane: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
         bar.bottomLine = Theme.gridStrong
         bar.translatesAutoresizingMaskIntoConstraints = false
         let buttons: [NSView] = [
-            ToolButton(symbol: "play.fill", tip: "Play/Pause", action: NSSelectorFromString("playPause:"), size: 14),
+            playButton,
             ToolButton(symbol: "stop.fill", tip: "Stop", action: NSSelectorFromString("stop:"), size: 13),
             ToolButton(symbol: "backward.end.fill", tip: "Previous Track", action: NSSelectorFromString("previousTrack:")),
             ToolButton(symbol: "forward.end.fill", tip: "Next Track", action: NSSelectorFromString("nextTrack:")),
@@ -60,6 +61,12 @@ final class PlaylistPane: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
         rebuildColumns()
         NotificationCenter.default.addObserver(self, selector: #selector(reload), name: .playlistChanged, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(syncSelection), name: .selectionChanged, object: nil)
+        NotificationCenter.default.addObserver(forName: .playerState, object: nil, queue: .main) { [weak self] _ in
+            let playing = Player.shared.isPlaying
+            (self?.playButton)?.image = NSImage(systemSymbolName: playing ? "pause.fill" : "play.fill", accessibilityDescription: "Play/Pause")?
+                .withSymbolConfiguration(.init(pointSize: 14, weight: .medium))
+            (self?.playButton)?.contentTintColor = playing ? Theme.accent : Theme.text
+        }
     }
     required init?(coder: NSCoder) { fatalError() }
 

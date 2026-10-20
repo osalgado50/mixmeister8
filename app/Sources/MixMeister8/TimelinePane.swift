@@ -91,6 +91,7 @@ final class TimelinePane: NSView {
             timeline.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
         ])
         NotificationCenter.default.addObserver(self, selector: #selector(update), name: .playlistChanged, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(playerTick), name: .playerTick, object: nil)
         zoomed()
         update()
     }
@@ -111,6 +112,22 @@ final class TimelinePane: NSView {
         let idx = s.layout.items.last { !$0.overlay && $0.mixStart <= cur }.map { $0.index + 1 } ?? (s.doc.tracks.isEmpty ? 0 : 1)
         func hms(_ t: Double) -> String { String(format: "%02d:%02d:%02d", Int(t) / 3600, Int(t) / 60 % 60, Int(t) % 60) }
         status.stringValue = "CURRENT \(hms(cur))(\(idx))   REMAINING \(hms(max(0, total - cur)))   TOTAL \(hms(total))(\(s.doc.tracks.count))"
+    }
+
+    /// Sigue a la reproducción: cursor, contadores, medidores y desplazamiento de la vista.
+    @objc private func playerTick() {
+        let p = Player.shared
+        timeline.playhead = p.position
+        meters.left = p.peakL; meters.right = p.peakR; meters.needsDisplay = true
+        updateStatus()
+        if p.isPlaying {
+            let x = timeline.x(p.position)
+            let vis = scroll.contentView.bounds
+            if x > vis.maxX - 60 || x < vis.minX {
+                scroll.contentView.scroll(to: NSPoint(x: max(0, x - vis.width * 0.25), y: 0))
+                scroll.reflectScrolledClipView(scroll.contentView)
+            }
+        }
     }
 
     @objc private func stripsChosen() { Session.shared.strips = [2, 4, 6, 8][max(0, strips.indexOfSelectedItem)] }
