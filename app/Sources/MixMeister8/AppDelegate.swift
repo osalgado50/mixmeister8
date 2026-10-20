@@ -367,6 +367,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         player.play(from: it.mixStart)
     }
 
+    @objc func doAudioSetupDialog(_ s: Any?) { OutputConfig.runDialog() }
+
     // MARK: View
 
     @objc func view2Strips(_ s: Any?) { session.strips = 2 }

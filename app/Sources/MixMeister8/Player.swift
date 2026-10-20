@@ -1,5 +1,6 @@
 import AVFoundation
 import AppKit
+import AudioToolbox
 
 extension Notification.Name {
     static let playerTick = Notification.Name("mm8.playerTick")
@@ -51,6 +52,7 @@ final class Player {
 
     init() {
         let mixer = engine.mainMixerNode
+        defer { applyOutputDevice() }
         mixer.installTap(onBus: 0, bufferSize: 1024, format: mixer.outputFormat(forBus: 0)) { [weak self] buf, _ in
             guard let self, let ch = buf.floatChannelData else { return }
             let n = Int(buf.frameLength)
@@ -61,6 +63,22 @@ final class Player {
             self.peakR = max(r, self.peakR * 0.85)
         }
     }
+
+    // MARK: Salida
+
+    /// Envía el audio a la salida elegida en Audio Output Configuration (o la del sistema).
+    func applyOutputDevice() {
+        let wasPlaying = isPlaying, at = position
+        if wasPlaying { stopNodes() }
+        engine.stop()
+        if let dev = OutputConfig.main(), let au = engine.outputNode.audioUnit {
+            var id = dev.id
+            let rc = AudioUnitSetProperty(au, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &id, UInt32(MemoryLayout<AudioDeviceID>.size))
+            NSLog("MixMeister 8: salida «\(dev.name)» (\(rc == noErr ? "ok" : "error \(rc)"))")
+        }
+        if wasPlaying { play(from: at) }
+    }
+    var outputName: String { OutputConfig.main()?.name ?? "—" }
 
     // MARK: Transporte
 
