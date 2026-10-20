@@ -10,6 +10,7 @@ namespace mmn {
 using cfloat = std::complex<float>;
 
 /// FFT radix-2 iterativa. Tamaño potencia de dos. Sin normalizar en ninguna dirección.
+/// real_forward usa un búfer interno: un objeto Fft no debe usarse desde dos hilos a la vez.
 class Fft {
 public:
     explicit Fft(std::size_t n);
@@ -27,6 +28,7 @@ private:
     std::vector<cfloat> tw_real_;      // giros de post-proceso real (n)
     std::vector<std::size_t> rev_h_;   // permutación para n/2
     std::vector<cfloat> tw_h_;         // giros para n/2
+    mutable std::vector<cfloat> scratch_;  // búfer de real_forward
 };
 
 /// Ventana de Hann periódica.

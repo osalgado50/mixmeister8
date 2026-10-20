@@ -246,7 +246,7 @@ OnsetEnvelope onset_envelope(std::span<const float> mono, int sr) {
     std::vector<float> prev(s.bins, 0.0f), cur(s.bins);
     for (std::size_t t = 0; t < s.frames; ++t) {
         const float* m = s.row(t);
-        for (std::size_t k = 0; k < s.bins; ++k) cur[k] = std::log1p(100.0f * m[k]);
+        for (std::size_t k = k_lo; k <= k_hi; ++k) cur[k] = std::log1p(100.0f * m[k]);  // solo lo que se usa
         for (std::size_t b = 0; b < e.n_bands; ++b) {
             const std::size_t a0 = edge[b], a1 = std::max(edge[b] + 1, edge[b + 1]);
             float acc = 0;
@@ -469,12 +469,15 @@ RhythmAnalysis analyze_rhythm(std::span<const float> mono, int sr, const TempoOp
     a.env = onset_envelope(mono, sr);
     a.candidates = tempo_candidates(a.env, opt);
     if (a.candidates.empty()) return a;
-    // Nivel métrico: la autocorrelación premia los tempos lentos (en música en bucle todo se
-    // repite cada compás), así que decide el pulso bajo cada tiempo, con un prior de nivel.
+    // Nivel métrico: regresión softmax sobre los rasgos de level_candidates(), ajustada con
+    // `mmn leveldiag` sobre 209 pistas reales con su .mxm. Validación cruzada: 99,5 % (la regla
+    // anterior, pulso × prior centrado en 120, daba 98,6 %). Rehacer: tools/ajustar_nivel.py.
+    // Lectura: manda la coherencia de la rejilla; x² penaliza alejarse de 120 BPM.
+    static constexpr std::array<double, kLevelFeatures> w{0.2627, 0.0144, 1.9306, -1.5359, -7.8035, 0.0965};
     double best_score = -1e300, best_bpm = a.candidates.front().bpm;
     for (const auto& c : level_candidates(a.env, a.candidates, opt)) {
-        const double oct = std::log2(c.bpm / opt.prior_center_bpm) / opt.prior_sigma_oct;
-        const double sc = c.f[0] - 0.5 * oct * oct;  // log(pulso · prior)
+        double sc = 0;
+        for (std::size_t q = 0; q < kLevelFeatures; ++q) sc += w[q] * c.f[q];
         if (sc > best_score) best_score = sc, best_bpm = c.bpm;
     }
     a.grid = refine_grid(a.env, best_bpm);
