@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key><string>MixMeister 8</string>
+    <key>CFBundleDisplayName</key><string>MixMeister 8</string>
+    <key>CFBundleExecutable</key><string>MixMeister 8</string>
+    <key>CFBundleIdentifier</key><string>es.mixmeister8.app</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleShortVersionString</key><string>8.0</string>
+    <key>CFBundleVersion</key><string>8.0.0</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
+    <key>LSMinimumSystemVersion</key><string>13.0</string>
+    <key>NSHighResolutionCapable</key><true/>
+    <key>NSPrincipalClass</key><string>NSApplication</string>
+    <key>NSHumanReadableCopyright</key><string>MixMeister 8 — continuación de MixMeister Fusion 7.8</string>
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key><string>MixMeister Playlist</string>
+            <key>CFBundleTypeRole</key><string>Editor</string>
+            <key>CFBundleTypeExtensions</key><array><string>mmp</string></array>
+            <key>LSHandlerRank</key><string>Default</string>
+        </dict>
+    </array>
+</dict>
+</plist>

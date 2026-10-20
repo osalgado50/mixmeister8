@@ -1,6 +1,6 @@
-# MMStudio Next
+# MixMeister 8 (proyecto mmstudio-next)
 
-Reconstrucción moderna de **MixMeister Studio 7.8**: nativa en macOS (Intel y Apple
+Continuación de **MixMeister Fusion 7.8** con la misma operativa y los mismos ficheros, imagen renovada y versión 8 (plan y estado: `docs/03-MIXMEISTER8.md`). Reconstrucción nativa en macOS (Intel y Apple
 Silicon), con un motor de análisis y mezcla escrito desde cero y validado contra lo que el
 propio MixMeister dejó en tu biblioteca.
 
@@ -20,7 +20,9 @@ con Rosetta 2 para apps Intel**.
 | Cambio de tempo sin cambiar el tono | WSOLA; tono < 1 Hz de error a ±12 % | pruebas sintéticas |
 | Transición entre dos pistas | rampa de tempo, golpes cuadrados, sin saturar | pruebas + escucha |
 | Sesiones `.mmp` de MixMeister | se leen, se encuentra el audio, se renderizan con `.cue` | lista de muestra del instalador |
-| Reproducción en directo, interfaz | pendiente | — |
+| Listas `.mmp`: lectura y **escritura** sin pérdidas | 652/652 idénticas al byte | 627 listas reales 2008-2026 + experimentos en MixMeister 7.8 |
+| App MixMeister 8 (fase 1) | menús exactos, biblioteca, lista, línea de tiempo | Spinning310 frente a MixMeister 7.8 |
+| Reproducción en directo | fase 2 | — |
 
 Cifras completas y método: `engine/docs/VALIDACION.md`.
 
@@ -29,8 +31,10 @@ Cifras completas y método: `engine/docs/VALIDACION.md`.
 - `engine/` — el motor (C++20, sin dependencias salvo dos cabeceras: minimp3 y doctest).
 - `docs/00-INSTALADOR.md` — qué hay dentro del `.pkg` de MixMeister y por qué no tiene futuro tal cual.
 - `docs/01-MAPA-FUNCIONAL.md` — las 56 funciones del original y su estado: la lista de paridad.
-- `docs/02-ARQUITECTURA.md` — capas nuevas frente a las originales y hoja de ruta.
-- `docs/spec/` — interfaz (29 nibs), modelo de datos y cadenas del original, decodificados.
+- `docs/02-ARQUITECTURA.md` — capas nuevas frente a las originales.
+- `docs/03-MIXMEISTER8.md` — plan de paridad por fases y estado de la app.
+- `app/` y `Package.swift` — la app de macOS (Swift/AppKit sobre el motor).
+- `docs/spec/` — interfaz (29 nibs), menús completos de Fusion, formato `.mmp`, catálogo, modelo de datos y cadenas, decodificados.
 - `tools/` — extracción del instalador (`extraer.sh` y auxiliares).
 
 ## Compilar y probar (en el Mac, Terminal)
