@@ -326,6 +326,55 @@ int cmd_sesion(int argc, char** argv) {
     return 0;
 }
 
+/// Lee cada lista, la vuelve a escribir desde el modelo y compara byte a byte.
+int cmd_mmp_check(int argc, char** argv) {
+    int ok = 0, bad = 0;
+    for (int i = 2; i < argc; ++i) {
+        try {
+            const auto in = read_file(argv[i]);
+            const auto out = serialize_playlist(parse_playlist(in));
+            if (in == out) { ++ok; continue; }
+            std::size_t at = 0;
+            while (at < in.size() && at < out.size() && in[at] == out[at]) ++at;
+            std::printf("DIFIERE\t%s\tbyte %zu (leído %zu, escrito %zu)\n", argv[i], at, in.size(), out.size());
+            ++bad;
+        } catch (const std::exception& e) {
+            std::printf("ERROR\t%s\t%s\n", argv[i], e.what());
+            ++bad;
+        }
+    }
+    std::printf("idénticas %d de %d\n", ok, ok + bad);
+    return bad ? 1 : 0;
+}
+
+int cmd_mmp_dump(const char* path) {
+    const Playlist p = read_playlist(path);
+    std::printf("versión %08x %08x · master %.2f dB · %zu efectos de master\n", p.version[0], p.version[1],
+                static_cast<double>(p.master_gain_db), p.master_effects.size());
+    for (const auto& e : p.master_effects) std::printf("  efecto master «%s» [%s] %zu parámetros\n", e.name.c_str(), e.plugin_code().c_str(), e.params.size());
+    int n = 0;
+    for (const auto& t : p.tracks) {
+        std::printf("%2d. %s%s\n", ++n, t.path.c_str(), t.overlay ? "  [overlay]" : "");
+        std::printf("    %.3f BPM (original %.3f), tono %+.2f, transición %s → %s, %zu compases\n", t.bpm, t.original_bpm(),
+                    static_cast<double>(t.key_semitones), t.has_transition_in ? t.transition_in.c_str() : "—",
+                    t.has_transition_out ? t.transition_out.c_str() : "—", t.beat_markers.size());
+        for (const auto& e : t.effects) std::printf("    efecto «%s» [%s] %zu parámetros\n", e.name.c_str(), e.plugin_code().c_str(), e.params.size());
+        for (const auto& it : t.layer) {
+            if (it.is_segment) {
+                const auto& s = it.segment;
+                std::printf("    segmento %9.3f → %9.3f s%s", s.src_start_us / 1e6, s.src_end_us / 1e6, s.reversed ? " al revés" : "");
+                if (s.kind == 2) std::printf("  overlay en compás %d + %.3f", s.overlay_measure, static_cast<double>(s.overlay_fraction));
+                std::printf("\n");
+            } else if (it.marker.type != kMeasure) {
+                const auto& m = it.marker;
+                std::printf("    %9.3f s  %-22s %g%s%s\n", m.pos_us / 1e6, marker_name(m.type), static_cast<double>(m.value),
+                            m.label.empty() ? "" : "  «", m.label.empty() ? "" : (m.label + "»").c_str());
+            }
+        }
+    }
+    return 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -343,6 +392,8 @@ int main(int argc, char** argv) {
         if (c == "bardiag" && argc == 4) return cmd_bardiag(argv[2], argv[3]);
         if (c == "leveldiag" && argc == 4) return cmd_leveldiag(argv[2], argv[3]);
         if (c == "mixdiag" && argc == 4) return cmd_mixdiag(argv[2], argv[3]);
+        if (c == "mmp-check" && argc >= 3) return cmd_mmp_check(argc, argv);
+        if (c == "mmp-dump" && argc == 3) return cmd_mmp_dump(argv[2]);
         return usage();
     } catch (const std::exception& e) {
         std::fprintf(stderr, "error: %s\n", e.what());

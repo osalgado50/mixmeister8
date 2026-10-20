@@ -1,0 +1,325 @@
+# Menús de MixMeister Fusion 7.8 — árbol completo
+
+Generado con `tools/menu_tree.py` desde los nibs (solo recursos). Orden, separadores, atajos y
+acción de cada ítem. Los menús sin título son contextuales; se identifican por su contenido.
+
+## OtherViews · uid 303
+- **Item1** → `_popUpItemAction:`
+- **Item2** → `_popUpItemAction:`
+- **Item3** → `_popUpItemAction:`
+
+## Menu · uid 705
+- **Cut** `⌘X` → `cut:`
+- **Copy** `⌘C` → `copy:`
+- **Paste** `⌘V` → `paste:`
+- ———
+- **Delete** → `del:`
+- ———
+- **Add To Category...** `⌃G` → `addToCategory:`
+- **Find Similar Tracks** `⌃F` → `findSimilarTracks:`
+- ———
+- **Set As Next Performance Track** `⌃N` → `setAsNextPerformanceTrack:`
+- ———
+- **Tweaks...** `⌃W` → `tweaks:`
+- **Quick Save Tweak** `⌃S` → `quickSaveTweak:`
+- ———
+- **Edit Tag...** `⌃E` → `editTag:`
+- **Adjust Track Settings...** `⌃T` → `adjustTrackSettings:`
+
+## Menu · uid 841
+- **TITLE** → `toggleTitle:` tag 1
+- **ARTIST** → `toggleArtist:` tag 2
+- **BPM** → `toggleBpm:` tag 3
+- **ALBUM** → `toggleAlbum:` tag 4
+- **TIME** → `toggleTime:` tag 5
+- **KEY** → `toggleKey:` tag 6
+- **KEYCODE** → `toggleKeyCode:` tag 7
+- **TWEAKED** → `toggleTweaked:` tag 8
+- **YEAR** → `toggleYear:` tag 9
+- **GENRE** → `toggleGenre:` tag 10
+- **COMPOSER** → `toggleComposer:` tag 11
+- **FILENAME** → `toggleFileName:` tag 12
+- **DATE ADDED** → `toggleDateAdded:` tag 13
+- **RATING** → `toggleRating:` tag 14
+- **COMMENTS** → `toggleComments:` tag 15
+- **TRACK** → `toggleTrack:` tag 16
+- **BITRATE** → `toggleBitRate:` tag 17
+- **LABEL** → `toggleLabel:` tag 18
+- **USER 1** → `toggleUser1:` tag 19
+- **USER 2** → `toggleUser2:` tag 20
+- **PLAYLIST** → `togglePlaylist:` tag 21
+
+## Menu · uid 885
+- **#** → `toggleIndex:`
+- **TITLE** → `toggleTitle:`
+- **ARTIST** → `toggleArtist:`
+- **BPM** → `toggleBpm:`
+- **KEY** → `toggleKey:`
+- **KEYCODE** → `toggleKeyCode:`
+- **TRANSITION** → `toggleTransition:`
+- **ALBUM** → `toggleAlbum:`
+- **TIME** → `toggleTime:`
+- **YEAR** → `toggleYear:`
+- **GENRE** → `toggleGenre:`
+- **COMPOSER** → `toggleComposer:`
+- **FILENAME** → `toggleFileName:`
+- **DATE ADDED** → `toggleDateAdded:`
+- **RATING** → `toggleRating:`
+- **COMMENTS** → `toggleComments:`
+- **TRACK** → `toggleTrack:`
+- **BITRATE** → `toggleBitRate:`
+- **LABEL** → `toggleLabel:`
+- **USER 1** → `toggleUser1:`
+- **USER 2** → `toggleUser2:`
+
+## (contextual) · uid 943
+- **Cut** `⌘X` → `cut:`
+- **Copy** `⌘C` → `copy:`
+- **Paste** `⌘V` → `paste:`
+- ———
+- **Delete** → `del:`
+- ———
+- **Add Volume Marker** `V` → `addVolumeMarker:`
+- **Add Treble Marker** `T` → `addTrebleMarker:`
+- **Add Midrange Marker** `M` → `addMidrangeMarker:`
+- **Add Bass Marker** `B` → `addBassMarker:`
+- ———
+- **Add Label Marker** `L` → `addLabelMarker:`
+- **Add Effects Parameter Marker** `E` → `addEffectsParameterMarker:`
+- ———
+- **Add Loop Start Marker** `9` → `addLoopStartMarker:`
+- **Add Loop End Marker** `0` → `addLoopEndMarker:`
+- ———
+- **Split Segment at Cursor** `S` → `splitSegmentAtCursor:`
+- **Reverse** → `reverse:`
+- ———
+- **Tweaks...** `⌃W` → `tweaks:`
+- **Adjust Track Settings...** `⌃T` → `adjustTrackSettings:`
+
+## (contextual) · uid 986
+- **Edit** → `markerEdit:`
+- **Delete** → `markerDelete:`
+
+## Menu · uid 993
+- **Cut** `⌘X` → `cut:`
+- **Copy** `⌘C` → `copy:`
+- **Paste** `⌘V` → `paste:`
+- ———
+- **Reverse** → `reverse:`
+- ———
+- **Delete Volume Markers** → `deleteVolumeMarkers:`
+- **Delete Treble Markers** → `deleteTrebleMarkers:`
+- **Delete Midrange Markers** → `deleteMidrangeMarkers:`
+- **Delete Bass Markers** → `deleteBassMarkers:`
+- **Delete Effects Markers** → `deleteEffectsMarkers:`
+
+## (contextual) · uid 1013
+- **Add Tempo Marker** → `rulerAddTempoMarker:`
+- **Add Original Tempo Marker** → `rulerAddOriginalTempoMarker:`
+
+## (contextual) · uid 1021
+- **Edit** → `editRulerMarkerItem:`
+- **Delete** → `deleteRulerMarkerItem:`
+
+## (contextual) · uid 1027
+- **2 Strips** → `view2Strips:`
+- **4 Strips** → `view4Strips:`
+- **6 Strips** → `view6Strips:`
+- **8 Strips** → `view8Strips:`
+
+## Menu · uid 1036
+- **Add to End of Playlist** `⌃Q` → `addToEndOfPlaylist:`
+- ———
+- **Delete from Library** → `deleteFromLibrary:`
+- ———
+- **Preview Song** `↩` → `catPreviewPlay:`
+- **Stop Previewing** → `catPreviewStop:`
+- ———
+- **Add to Category...** `⌃G` → `addToCategory:`
+- **Remove from Active Category** → `removeFromActiveCategory:`
+- **Find Similar Tracks** `⌃F` → `findSimilarItems:`
+- ———
+- **Tweaks...** `⌃W` → `trackPresets:`
+- ———
+- **Edit Tag...** `⌃E` → `editTag:`
+
+## Menu · uid 1064
+- **NSSearchFieldRecentsMenuItemTag** tag 1001
+- **No Recent Searches** tag 1003
+- ———
+- **Clear** tag 1002
+
+## Menu · uid 1122
+- **Add Measure Start Marker** → `addMeasureStartMarker:`
+- **Delete All Measure Markers** → `deleteAllMeasureMarkers:`
+
+## MainMenu · uid 1700
+- **MixMeister**
+  - **About MixMeister** → `orderFrontStandardAboutPanel:`
+  - ———
+  - **Preferences…** `⌘,` → `preferences:`
+  - ———
+  - **Services**
+  - ———
+  - **Hide MixMeister** `⌘H` → `hide:`
+  - **Hide Others** `⌥⌘H` → `hideOtherApplications:`
+  - **Show All** → `unhideAllApplications:`
+  - ———
+  - **Quit MixMeister** `⌘Q` → `terminate:`
+- **File**
+  - **Add Files To Library...** → `addFilesToLibrary:`
+  - ———
+  - **New Playlist** `⌘N` → `newPlayList:`
+  - **Open Playlist...** `⌘O` → `openPlayList:`
+  - **Append Playlist...** → `appendPlayList:`
+  - **Open Recent Playlist**
+    - ———
+    - **Clear Menu** → `clearRecentFiles:`
+  - ———
+  - **Save Playlist** `⌘S` → `savePlayList:`
+  - **Save Playlist As…** `⇧⌘S` → `savePlayListAs:`
+  - ———
+  - **Export Playlist to File...** → `exportPlaylistToFile:`
+  - **Export Playlist to iTunes...** → `exportPlaylistToDevice:`
+  - **Export Playlist as Mobile Mix...** → `exportPlaylistAsMobileMix:`
+  - **Burn CD...** → `burnCD:`
+  - ———
+  - **Print Library…** → `printLibrary:`
+  - **Print Playlist…** `⌘P` → `printPlaylist:`
+- **Edit**
+  - **Undo** `⌘Z` → `undo:`
+  - **Redo** `⇧⌘Z` → `redo:`
+  - ———
+  - **Cut** `⌘X` → `cut:`
+  - **Copy** `⌘C` → `copy:`
+  - **Paste** `⌘V` → `paste:`
+  - ———
+  - **Delete** → `delete:`
+  - ———
+  - **Select All** `⌘A` → `selectAll:`
+- **View**
+  - **Library** → `viewLibrary:`
+  - **Effects** → `viewEffects:`
+  - ———
+  - **Song Slicer** → `viewSongSlicer:`
+  - **Effects Rack** → `viewEffectsRack:`
+  - ———
+  - **Zoom In** `+` → `zoomIn:`
+  - **Zoom Out** `-` → `zoomOut:`
+  - ———
+  - **Timeline Ruler**
+    - **Time** → `timelineRulerTime:`
+    - **Measures and Beats** → `timelineRulerMeasuresAndBeats:`
+  - ———
+  - **2 Strips** → `view2Strips:`
+  - **4 Strips** → `view4Strips:`
+  - **6 Strips** → `view6Strips:`
+  - **8 Strips** → `view8Strips:`
+  - ———
+  - **Show Performed Tracks** `⇧⌘R` → `showPerformedTracks:`
+- **Library**
+  - **Columns**
+    - **TITLE** → `toggleTitle:` tag 1
+    - **ARTIST** → `toggleArtist:` tag 2
+    - **BPM** → `toggleBpm:` tag 3
+    - **ALBUM** → `toggleAlbum:` tag 4
+    - **TIME** → `toggleTime:` tag 5
+    - **KEY** → `toggleKey:` tag 6
+    - **KEYCODE** → `toggleKeyCode:` tag 7
+    - **TWEAKED** → `toggleTweaked:` tag 8
+    - **YEAR** → `toggleYear:` tag 9
+    - **GENRE** → `toggleGenre:` tag 10
+    - **COMPOSER** → `toggleComposer:` tag 11
+    - **FILENAME** → `toggleFileName:` tag 12
+    - **DATE ADDED** → `toggleDateAdded:` tag 13
+    - **RATING** → `toggleRating:` tag 14
+    - **COMMENTS** → `toggleComments:` tag 15
+    - **TRACK** → `toggleTrack:` tag 16
+    - **BITRATE** → `toggleBitRate:` tag 17
+    - **LABEL** → `toggleLabel:` tag 18
+    - **USER 1** → `toggleUser1:` tag 19
+    - **USER 2** → `toggleUser2:` tag 20
+    - **PLAYLIST** → `togglePlaylist:`
+  - ———
+  - **New Category...** → `newCategory:`
+  - **Delete Category...** → `deleteCategory:`
+  - ———
+  - **Clean Up Library...** → `cleanUpLibrary:`
+  - **Import Library...** → `importLibrary:`
+  - **Export Library...** → `exportLibrary:`
+  - **Import from iTunes...** → `importITunes:`
+  - **Smart Playlist...** → `smartPlaylist:`
+- **Playback**
+  - **Play/Pause** → `playPause:`
+  - **Stop** → `stop:`
+  - **Jog Backward** → `jogBackward:`
+  - **Jog Forward** → `jogForward:`
+  - ———
+  - **Mix Now** `` → `mixNow:`
+  - ———
+  - **Previous Track** → `previousTrack:`
+  - **Next Track** → `nextTrack:`
+  - ———
+  - **Drag Tempo** `[` → `dragTempo:`
+  - **Push Tempo** `]` → `pushTempo:`
+  - ———
+  - **Perform/Pause** `` → `performPause:`
+  - **Fade and Cue Next** `` → `stopAndCueNext:`
+  - ———
+  - **Mix Performance Now** `` → `mixPerformanceNow:`
+  - **Reset Performance Position** `⌘R` → `resetPerformancePosition:`
+- **Tools**
+  - **Transitions**
+    - **Item**
+  - ———
+  - **Snap To Beat** `⇧⌘B` → `snapToBeat:`
+  - **Snap To**
+    - **8 Measures** → `snapTo8Measures:`
+    - **4 Measures** → `snapTo4Measures:`
+    - **2 Measures** → `snapTo2Measures:`
+    - **1 Measure** → `snapTo1Measure:`
+    - **Half Note** → `snapToHalfNote:`
+    - **Quarter Note** → `snapToQuarterNote:`
+    - **Eighth Note** → `snapToEighthNote:`
+    - **Sixteenth Note** → `snapToSixteenthNote:`
+  - ———
+  - **Add To Category...** `⌃G` → `handleMenuItem:` tag 2001
+  - **Remove From Active Category...** → `handleMenuItem:` tag 2002
+  - **Find Similar Tracks** `⌃F` → `handleMenuItem:` tag 2003
+  - ———
+  - **Add Volume Marker** `V` → `handleMenuItem:` tag 2101
+  - **Add Treble Marker** `T` → `handleMenuItem:` tag 2102
+  - **Add Midrange Marker** `M` → `handleMenuItem:` tag 2103
+  - **Add Bass Marker** `B` → `handleMenuItem:` tag 2104
+  - ———
+  - **Add Label Marker** `L` → `handleMenuItem:` tag 2105
+  - **Add Effects Parameter Marker** `E` → `handleMenuItem:` tag 2106
+  - ———
+  - **Add Loop Start Marker** `9` → `handleMenuItem:` tag 2107
+  - **Add Loop End Marker** `0` → `handleMenuItem:` tag 2108
+  - ———
+  - **Split Segment at Cursor** `S` → `handleMenuItem:` tag 2109
+  - **Reverse** → `handleMenuItem:` tag 2110
+  - ———
+  - **Set As Next Performance Track** `⌃N` → `handleMenuItem:` tag 2201
+  - ———
+  - **Tweaks...** `⌃W` → `handleMenuItem:` tag 2202
+  - **Quick Save Tweak** `⌃S` → `handleMenuItem:` tag 2203
+  - ———
+  - **Edit Tag...** `⌃E` → `handleMenuItem:` tag 2204
+  - **Adjust Track Settings...** `⌃T` → `handleMenuItem:` tag 2205
+  - ———
+  - **Audio Output Configuration...** → `doAudioSetupDialog:`
+- **Window**
+  - **Minimize** `⌘M` → `performMiniaturize:`
+  - **Zoom** → `performZoom:`
+  - ———
+  - **Bring All to Front** → `arrangeInFront:`
+- **Help**
+  - **MixMeister Fusion Help** `⌘?` → `help:`
+  - ———
+  - **Buy Now...** → `helpBuyNow:`
+  - **Register Online...** → `helpRegisterOnline:`
+  - **Check For Updates...** → `helpCheckForUpdates:`
+  - ———
+  - **Support...** → `helpSupport:`

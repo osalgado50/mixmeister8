@@ -1,0 +1,1932 @@
+[
+ {
+  "title": "OtherViews",
+  "uid": 303,
+  "items": [
+   {
+    "title": "Item1",
+    "key": "",
+    "mods": [],
+    "action": "_popUpItemAction:",
+    "state": 1
+   },
+   {
+    "title": "Item2",
+    "key": "",
+    "mods": [],
+    "action": "_popUpItemAction:"
+   },
+   {
+    "title": "Item3",
+    "key": "",
+    "mods": [],
+    "action": "_popUpItemAction:"
+   }
+  ]
+ },
+ {
+  "title": "Menu",
+  "uid": 705,
+  "items": [
+   {
+    "title": "Cut",
+    "key": "x",
+    "mods": [
+     "cmd"
+    ],
+    "action": "cut:"
+   },
+   {
+    "title": "Copy",
+    "key": "c",
+    "mods": [
+     "cmd"
+    ],
+    "action": "copy:"
+   },
+   {
+    "title": "Paste",
+    "key": "v",
+    "mods": [
+     "cmd"
+    ],
+    "action": "paste:"
+   },
+   {
+    "separator": true
+   },
+   {
+    "title": "Delete",
+    "key": "",
+    "mods": [],
+    "action": "del:"
+   },
+   {
+    "separator": true
+   },
+   {
+    "title": "Add To Category...",
+    "key": "g",
+    "mods": [
+     "ctrl"
+    ],
+    "action": "addToCategory:"
+   },
+   {
+    "title": "Find Similar Tracks",
+    "key": "f",
+    "mods": [
+     "ctrl"
+    ],
+    "action": "findSimilarTracks:"
+   },
+   {
+    "separator": true
+   },
+   {
+    "title": "Set As Next Performance Track",
+    "key": "n",
+    "mods": [
+     "ctrl"
+    ],
+    "action": "setAsNextPerformanceTrack:"
+   },
+   {
+    "separator": true
+   },
+   {
+    "title": "Tweaks...",
+    "key": "w",
+    "mods": [
+     "ctrl"
+    ],
+    "action": "tweaks:"
+   },
+   {
+    "title": "Quick Save Tweak",
+    "key": "s",
+    "mods": [
+     "ctrl"
+    ],
+    "action": "quickSaveTweak:"
+   },
+   {
+    "separator": true
+   },
+   {
+    "title": "Edit Tag...",
+    "key": "e",
+    "mods": [
+     "ctrl"
+    ],
+    "action": "editTag:"
+   },
+   {
+    "title": "Adjust Track Settings...",
+    "key": "t",
+    "mods": [
+     "ctrl"
+    ],
+    "action": "adjustTrackSettings:"
+   }
+  ]
+ },
+ {
+  "title": "Menu",
+  "uid": 841,
+  "items": [
+   {
+    "title": "TITLE",
+    "key": "",
+    "mods": [],
+    "action": "toggleTitle:",
+    "tag": 1,
+    "state": 1
+   },
+   {
+    "title": "ARTIST",
+    "key": "",
+    "mods": [],
+    "action": "toggleArtist:",
+    "tag": 2,
+    "state": 1
+   },
+   {
+    "title": "BPM",
+    "key": "",
+    "mods": [],
+    "action": "toggleBpm:",
+    "tag": 3,
+    "state": 1
+   },
+   {
+    "title": "ALBUM",
+    "key": "",
+    "mods": [],
+    "action": "toggleAlbum:",
+    "tag": 4,
+    "state": 1
+   },
+   {
+    "title": "TIME",
+    "key": "",
+    "mods": [],
+    "action": "toggleTime:",
+    "tag": 5,
+    "state": 1
+   },
+   {
+    "title": "KEY",
+    "key": "",
+    "mods": [],
+    "action": "toggleKey:",
+    "tag": 6,
+    "state": 1
+   },
+   {
+    "title": "KEYCODE",
+    "key": "",
+    "mods": [],
+    "action": "toggleKeyCode:",
+    "tag": 7,
+    "state": 1
+   },
+   {
+    "title": "TWEAKED",
+    "key": "",
+    "mods": [],
+    "action": "toggleTweaked:",
+    "tag": 8
+   },
+   {
+    "title": "YEAR",
+    "key": "",
+    "mods": [],
+    "action": "toggleYear:",
+    "tag": 9
+   },
+   {
+    "title": "GENRE",
+    "key": "",
+    "mods": [],
+    "action": "toggleGenre:",
+    "tag": 10
+   },
+   {
+    "title": "COMPOSER",
+    "key": "",
+    "mods": [],
+    "action": "toggleComposer:",
+    "tag": 11
+   },
+   {
+    "title": "FILENAME",
+    "key": "",
+    "mods": [],
+    "action": "toggleFileName:",
+    "tag": 12
+   },
+   {
+    "title": "DATE ADDED",
+    "key": "",
+    "mods": [],
+    "action": "toggleDateAdded:",
+    "tag": 13
+   },
+   {
+    "title": "RATING",
+    "key": "",
+    "mods": [],
+    "action": "toggleRating:",
+    "tag": 14
+   },
+   {
+    "title": "COMMENTS",
+    "key": "",
+    "mods": [],
+    "action": "toggleComments:",
+    "tag": 15
+   },
+   {
+    "title": "TRACK",
+    "key": "",
+    "mods": [],
+    "action": "toggleTrack:",
+    "tag": 16
+   },
+   {
+    "title": "BITRATE",
+    "key": "",
+    "mods": [],
+    "action": "toggleBitRate:",
+    "tag": 17
+   },
+   {
+    "title": "LABEL",
+    "key": "",
+    "mods": [],
+    "action": "toggleLabel:",
+    "tag": 18
+   },
+   {
+    "title": "USER 1",
+    "key": "",
+    "mods": [],
+    "action": "toggleUser1:",
+    "tag": 19
+   },
+   {
+    "title": "USER 2",
+    "key": "",
+    "mods": [],
+    "action": "toggleUser2:",
+    "tag": 20,
+    "state": 1
+   },
+   {
+    "title": "PLAYLIST",
+    "key": "",
+    "mods": [],
+    "action": "togglePlaylist:",
+    "tag": 21
+   }
+  ]
+ },
+ {
+  "title": "Menu",
+  "uid": 885,
+  "items": [
+   {
+    "title": "#",
+    "key": "",
+    "mods": [],
+    "action": "toggleIndex:"
+   },
+   {
+    "title": "TITLE",
+    "key": "",
+    "mods": [],
+    "action": "toggleTitle:"
+   },
+   {
+    "title": "ARTIST",
+    "key": "",
+    "mods": [],
+    "action": "toggleArtist:"
+   },
+   {
+    "title": "BPM",
+    "key": "",
+    "mods": [],
+    "action": "toggleBpm:"
+   },
+   {
+    "title": "KEY",
+    "key": "",
+    "mods": [],
+    "action": "toggleKey:"
+   },
+   {
+    "title": "KEYCODE",
+    "key": "",
+    "mods": [],
+    "action": "toggleKeyCode:"
+   },
+   {
+    "title": "TRANSITION",
+    "key": "",
+    "mods": [],
+    "action": "toggleTransition:"
+   },
+   {
+    "title": "ALBUM",
+    "key": "",
+    "mods": [],
+    "action": "toggleAlbum:"
+   },
+   {
+    "title": "TIME",
+    "key": "",
+    "mods": [],
+    "action": "toggleTime:"
+   },
+   {
+    "title": "YEAR",
+    "key": "",
+    "mods": [],
+    "action": "toggleYear:"
+   },
+   {
+    "title": "GENRE",
+    "key": "",
+    "mods": [],
+    "action": "toggleGenre:"
+   },
+   {
+    "title": "COMPOSER",
+    "key": "",
+    "mods": [],
+    "action": "toggleComposer:"
+   },
+   {
+    "title": "FILENAME",
+    "key": "",
+    "mods": [],
+    "action": "toggleFileName:"
+   },
+   {
+    "title": "DATE ADDED",
+    "key": "",
+    "mods": [],
+    "action": "toggleDateAdded:"
+   },
+   {
+    "title": "RATING",
+    "key": "",
+    "mods": [],
+    "action": "toggleRating:"
+   },
+   {
+    "title": "COMMENTS",
+    "key": "",
+    "mods": [],
+    "action": "toggleComments:"
+   },
+   {
+    "title": "TRACK",
+    "key": "",
+    "mods": [],
+    "action": "toggleTrack:"
+   },
+   {
+    "title": "BITRATE",
+    "key": "",
+    "mods": [],
+    "action": "toggleBitRate:"
+   },
+   {
+    "title": "LABEL",
+    "key": "",
+    "mods": [],
+    "action": "toggleLabel:"
+   },
+   {
+    "title": "USER 1",
+    "key": "",
+    "mods": [],
+    "action": "toggleUser1:"
+   },
+   {
+    "title": "USER 2",
+    "key": "",
+    "mods": [],
+    "action": "toggleUser2:"
+   }
+  ]
+ },
+ {
+  "title": "",
+  "uid": 943,
+  "items": [
+   {
+    "title": "Cut",
+    "key": "x",
+    "mods": [
+     "cmd"
+    ],
+    "action": "cut:"
+   },
+   {
+    "title": "Copy",
+    "key": "c",
+    "mods": [
+     "cmd"
+    ],
+    "action": "copy:"
+   },
+   {
+    "title": "Paste",
+    "key": "v",
+    "mods": [
+     "cmd"
+    ],
+    "action": "paste:"
+   },
+   {
+    "separator": true
+   },
+   {
+    "title": "Delete",
+    "key": "",
+    "mods": [],
+    "action": "del:"
+   },
+   {
+    "separator": true
+   },
+   {
+    "title": "Add Volume Marker",
+    "key": "v",
+    "mods": [],
+    "action": "addVolumeMarker:"
+   },
+   {
+    "title": "Add Treble Marker",
+    "key": "t",
+    "mods": [],
+    "action": "addTrebleMarker:"
+   },
+   {
+    "title": "Add Midrange Marker",
+    "key": "m",
+    "mods": [],
+    "action": "addMidrangeMarker:"
+   },
+   {
+    "title": "Add Bass Marker",
+    "key": "b",
+    "mods": [],
+    "action": "addBassMarker:"
+   },
+   {
+    "separator": true
+   },
+   {
+    "title": "Add Label Marker",
+    "key": "l",
+    "mods": [],
+    "action": "addLabelMarker:"
+   },
+   {
+    "title": "Add Effects Parameter Marker",
+    "key": "e",
+    "mods": [],
+    "action": "addEffectsParameterMarker:"
+   },
+   {
+    "separator": true
+   },
+   {
+    "title": "Add Loop Start Marker",
+    "key": "9",
+    "mods": [],
+    "action": "addLoopStartMarker:"
+   },
+   {
+    "title": "Add Loop End Marker",
+    "key": "0",
+    "mods": [],
+    "action": "addLoopEndMarker:"
+   },
+   {
+    "separator": true
+   },
+   {
+    "title": "Split Segment at Cursor",
+    "key": "s",
+    "mods": [],
+    "action": "splitSegmentAtCursor:"
+   },
+   {
+    "title": "Reverse",
+    "key": "",
+    "mods": [],
+    "action": "reverse:"
+   },
+   {
+    "separator": true
+   },
+   {
+    "title": "Tweaks...",
+    "key": "w",
+    "mods": [
+     "ctrl"
+    ],
+    "action": "tweaks:"
+   },
+   {
+    "title": "Adjust Track Settings...",
+    "key": "t",
+    "mods": [
+     "ctrl"
+    ],
+    "action": "adjustTrackSettings:"
+   }
+  ]
+ },
+ {
+  "title": "",
+  "uid": 986,
+  "items": [
+   {
+    "title": "Edit",
+    "key": "",
+    "mods": [],
+    "action": "markerEdit:"
+   },
+   {
+    "title": "Delete",
+    "key": "",
+    "mods": [],
+    "action": "markerDelete:"
+   }
+  ]
+ },
+ {
+  "title": "Menu",
+  "uid": 993,
+  "items": [
+   {
+    "title": "Cut",
+    "key": "x",
+    "mods": [
+     "cmd"
+    ],
+    "action": "cut:"
+   },
+   {
+    "title": "Copy",
+    "key": "c",
+    "mods": [
+     "cmd"
+    ],
+    "action": "copy:"
+   },
+   {
+    "title": "Paste",
+    "key": "v",
+    "mods": [
+     "cmd"
+    ],
+    "action": "paste:"
+   },
+   {
+    "separator": true
+   },
+   {
+    "title": "Reverse",
+    "key": "",
+    "mods": [],
+    "action": "reverse:"
+   },
+   {
+    "separator": true
+   },
+   {
+    "title": "Delete Volume Markers",
+    "key": "",
+    "mods": [],
+    "action": "deleteVolumeMarkers:"
+   },
+   {
+    "title": "Delete Treble Markers",
+    "key": "",
+    "mods": [],
+    "action": "deleteTrebleMarkers:"
+   },
+   {
+    "title": "Delete Midrange Markers",
+    "key": "",
+    "mods": [],
+    "action": "deleteMidrangeMarkers:"
+   },
+   {
+    "title": "Delete Bass Markers",
+    "key": "",
+    "mods": [],
+    "action": "deleteBassMarkers:"
+   },
+   {
+    "title": "Delete Effects Markers",
+    "key": "",
+    "mods": [],
+    "action": "deleteEffectsMarkers:"
+   }
+  ]
+ },
+ {
+  "title": "",
+  "uid": 1013,
+  "items": [
+   {
+    "title": "Add Tempo Marker",
+    "key": "",
+    "mods": [],
+    "action": "rulerAddTempoMarker:"
+   },
+   {
+    "title": "Add Original Tempo Marker",
+    "key": "",
+    "mods": [],
+    "action": "rulerAddOriginalTempoMarker:"
+   }
+  ]
+ },
+ {
+  "title": "",
+  "uid": 1021,
+  "items": [
+   {
+    "title": "Edit",
+    "key": "",
+    "mods": [],
+    "action": "editRulerMarkerItem:"
+   },
+   {
+    "title": "Delete",
+    "key": "",
+    "mods": [],
+    "action": "deleteRulerMarkerItem:"
+   }
+  ]
+ },
+ {
+  "title": "",
+  "uid": 1027,
+  "items": [
+   {
+    "title": "2 Strips",
+    "key": "",
+    "mods": [],
+    "action": "view2Strips:"
+   },
+   {
+    "title": "4 Strips",
+    "key": "",
+    "mods": [],
+    "action": "view4Strips:"
+   },
+   {
+    "title": "6 Strips",
+    "key": "",
+    "mods": [],
+    "action": "view6Strips:"
+   },
+   {
+    "title": "8 Strips",
+    "key": "",
+    "mods": [],
+    "action": "view8Strips:"
+   }
+  ]
+ },
+ {
+  "title": "Menu",
+  "uid": 1036,
+  "items": [
+   {
+    "title": "Add to End of Playlist",
+    "key": "q",
+    "mods": [
+     "ctrl"
+    ],
+    "action": "addToEndOfPlaylist:"
+   },
+   {
+    "separator": true
+   },
+   {
+    "title": "Delete from Library",
+    "key": "",
+    "mods": [],
+    "action": "deleteFromLibrary:"
+   },
+   {
+    "separator": true
+   },
+   {
+    "title": "Preview Song",
+    "key": "\r",
+    "mods": [],
+    "action": "catPreviewPlay:"
+   },
+   {
+    "title": "Stop Previewing",
+    "key": "",
+    "mods": [],
+    "action": "catPreviewStop:"
+   },
+   {
+    "separator": true
+   },
+   {
+    "title": "Add to Category...",
+    "key": "g",
+    "mods": [
+     "ctrl"
+    ],
+    "action": "addToCategory:"
+   },
+   {
+    "title": "Remove from Active Category",
+    "key": "",
+    "mods": [],
+    "action": "removeFromActiveCategory:"
+   },
+   {
+    "title": "Find Similar Tracks",
+    "key": "f",
+    "mods": [
+     "ctrl"
+    ],
+    "action": "findSimilarItems:"
+   },
+   {
+    "separator": true
+   },
+   {
+    "title": "Tweaks...",
+    "key": "w",
+    "mods": [
+     "ctrl"
+    ],
+    "action": "trackPresets:"
+   },
+   {
+    "separator": true
+   },
+   {
+    "title": "Edit Tag...",
+    "key": "e",
+    "mods": [
+     "ctrl"
+    ],
+    "action": "editTag:"
+   }
+  ]
+ },
+ {
+  "title": "Menu",
+  "uid": 1064,
+  "items": [
+   {
+    "title": "NSSearchFieldRecentsMenuItemTag",
+    "key": "",
+    "mods": [],
+    "tag": 1001
+   },
+   {
+    "title": "No Recent Searches",
+    "key": "",
+    "mods": [],
+    "tag": 1003
+   },
+   {
+    "separator": true
+   },
+   {
+    "title": "Clear",
+    "key": "",
+    "mods": [],
+    "tag": 1002
+   }
+  ]
+ },
+ {
+  "title": "Menu",
+  "uid": 1122,
+  "items": [
+   {
+    "title": "Add Measure Start Marker",
+    "key": "",
+    "mods": [],
+    "action": "addMeasureStartMarker:"
+   },
+   {
+    "title": "Delete All Measure Markers",
+    "key": "",
+    "mods": [],
+    "action": "deleteAllMeasureMarkers:"
+   }
+  ]
+ },
+ {
+  "title": "MainMenu",
+  "uid": 1700,
+  "items": [
+   {
+    "title": "MixMeister",
+    "key": "",
+    "mods": [],
+    "submenu": {
+     "title": "MixMeister",
+     "uid": 1140,
+     "items": [
+      {
+       "title": "About MixMeister",
+       "key": "",
+       "mods": [],
+       "action": "orderFrontStandardAboutPanel:"
+      },
+      {
+       "separator": true
+      },
+      {
+       "title": "Preferences…",
+       "key": ",",
+       "mods": [
+        "cmd"
+       ],
+       "action": "preferences:"
+      },
+      {
+       "separator": true
+      },
+      {
+       "title": "Services",
+       "key": "",
+       "mods": [],
+       "submenu": {
+        "title": "Services",
+        "uid": 1709,
+        "items": []
+       }
+      },
+      {
+       "separator": true
+      },
+      {
+       "title": "Hide MixMeister",
+       "key": "h",
+       "mods": [
+        "cmd"
+       ],
+       "action": "hide:"
+      },
+      {
+       "title": "Hide Others",
+       "key": "h",
+       "mods": [
+        "opt",
+        "cmd"
+       ],
+       "action": "hideOtherApplications:"
+      },
+      {
+       "title": "Show All",
+       "key": "",
+       "mods": [],
+       "action": "unhideAllApplications:"
+      },
+      {
+       "separator": true
+      },
+      {
+       "title": "Quit MixMeister",
+       "key": "q",
+       "mods": [
+        "cmd"
+       ],
+       "action": "terminate:"
+      }
+     ]
+    }
+   },
+   {
+    "title": "File",
+    "key": "",
+    "mods": [],
+    "submenu": {
+     "title": "File",
+     "uid": 492,
+     "items": [
+      {
+       "title": "Add Files To Library...",
+       "key": "",
+       "mods": [],
+       "action": "addFilesToLibrary:"
+      },
+      {
+       "separator": true
+      },
+      {
+       "title": "New Playlist",
+       "key": "n",
+       "mods": [
+        "cmd"
+       ],
+       "action": "newPlayList:"
+      },
+      {
+       "title": "Open Playlist...",
+       "key": "o",
+       "mods": [
+        "cmd"
+       ],
+       "action": "openPlayList:"
+      },
+      {
+       "title": "Append Playlist...",
+       "key": "",
+       "mods": [],
+       "action": "appendPlayList:"
+      },
+      {
+       "title": "Open Recent Playlist",
+       "key": "",
+       "mods": [],
+       "submenu": {
+        "title": "Open Recent Playlist",
+        "uid": 509,
+        "items": [
+         {
+          "separator": true
+         },
+         {
+          "title": "Clear Menu",
+          "key": "",
+          "mods": [],
+          "action": "clearRecentFiles:"
+         }
+        ]
+       }
+      },
+      {
+       "separator": true
+      },
+      {
+       "title": "Save Playlist",
+       "key": "s",
+       "mods": [
+        "cmd"
+       ],
+       "action": "savePlayList:"
+      },
+      {
+       "title": "Save Playlist As…",
+       "key": "S",
+       "mods": [
+        "cmd",
+        "shift"
+       ],
+       "action": "savePlayListAs:"
+      },
+      {
+       "separator": true
+      },
+      {
+       "title": "Export Playlist to File...",
+       "key": "",
+       "mods": [],
+       "action": "exportPlaylistToFile:"
+      },
+      {
+       "title": "Export Playlist to iTunes...",
+       "key": "",
+       "mods": [],
+       "action": "exportPlaylistToDevice:"
+      },
+      {
+       "title": "Export Playlist as Mobile Mix...",
+       "key": "",
+       "mods": [],
+       "action": "exportPlaylistAsMobileMix:"
+      },
+      {
+       "title": "Burn CD...",
+       "key": "",
+       "mods": [],
+       "action": "burnCD:"
+      },
+      {
+       "separator": true
+      },
+      {
+       "title": "Print Library…",
+       "key": "",
+       "mods": [],
+       "action": "printLibrary:"
+      },
+      {
+       "title": "Print Playlist…",
+       "key": "p",
+       "mods": [
+        "cmd"
+       ],
+       "action": "printPlaylist:"
+      }
+     ]
+    }
+   },
+   {
+    "title": "Edit",
+    "key": "",
+    "mods": [],
+    "submenu": {
+     "title": "Edit",
+     "uid": 1181,
+     "items": [
+      {
+       "title": "Undo",
+       "key": "z",
+       "mods": [
+        "cmd"
+       ],
+       "action": "undo:"
+      },
+      {
+       "title": "Redo",
+       "key": "Z",
+       "mods": [
+        "cmd",
+        "shift"
+       ],
+       "action": "redo:"
+      },
+      {
+       "separator": true
+      },
+      {
+       "title": "Cut",
+       "key": "x",
+       "mods": [
+        "cmd"
+       ],
+       "action": "cut:"
+      },
+      {
+       "title": "Copy",
+       "key": "c",
+       "mods": [
+        "cmd"
+       ],
+       "action": "copy:"
+      },
+      {
+       "title": "Paste",
+       "key": "v",
+       "mods": [
+        "cmd"
+       ],
+       "action": "paste:"
+      },
+      {
+       "separator": true
+      },
+      {
+       "title": "Delete",
+       "key": "",
+       "mods": [],
+       "action": "delete:"
+      },
+      {
+       "separator": true
+      },
+      {
+       "title": "Select All",
+       "key": "a",
+       "mods": [
+        "cmd"
+       ],
+       "action": "selectAll:"
+      }
+     ]
+    }
+   },
+   {
+    "title": "View",
+    "key": "",
+    "mods": [],
+    "submenu": {
+     "title": "View",
+     "uid": 644,
+     "items": [
+      {
+       "title": "Library",
+       "key": "",
+       "mods": [],
+       "action": "viewLibrary:"
+      },
+      {
+       "title": "Effects",
+       "key": "",
+       "mods": [],
+       "action": "viewEffects:"
+      },
+      {
+       "separator": true
+      },
+      {
+       "title": "Song Slicer",
+       "key": "",
+       "mods": [],
+       "action": "viewSongSlicer:"
+      },
+      {
+       "title": "Effects Rack",
+       "key": "",
+       "mods": [],
+       "action": "viewEffectsRack:"
+      },
+      {
+       "separator": true
+      },
+      {
+       "title": "Zoom In",
+       "key": "+",
+       "mods": [],
+       "action": "zoomIn:"
+      },
+      {
+       "title": "Zoom Out",
+       "key": "-",
+       "mods": [],
+       "action": "zoomOut:"
+      },
+      {
+       "separator": true
+      },
+      {
+       "title": "Timeline Ruler",
+       "key": "",
+       "mods": [],
+       "submenu": {
+        "title": "Timeline Ruler",
+        "uid": 666,
+        "items": [
+         {
+          "title": "Time",
+          "key": "",
+          "mods": [],
+          "action": "timelineRulerTime:",
+          "state": 1
+         },
+         {
+          "title": "Measures and Beats",
+          "key": "",
+          "mods": [],
+          "action": "timelineRulerMeasuresAndBeats:"
+         }
+        ]
+       }
+      },
+      {
+       "separator": true
+      },
+      {
+       "title": "2 Strips",
+       "key": "",
+       "mods": [],
+       "action": "view2Strips:"
+      },
+      {
+       "title": "4 Strips",
+       "key": "",
+       "mods": [],
+       "action": "view4Strips:",
+       "state": 1
+      },
+      {
+       "title": "6 Strips",
+       "key": "",
+       "mods": [],
+       "action": "view6Strips:"
+      },
+      {
+       "title": "8 Strips",
+       "key": "",
+       "mods": [],
+       "action": "view8Strips:"
+      },
+      {
+       "separator": true
+      },
+      {
+       "title": "Show Performed Tracks",
+       "key": "R",
+       "mods": [
+        "cmd",
+        "shift"
+       ],
+       "action": "showPerformedTracks:"
+      }
+     ]
+    }
+   },
+   {
+    "title": "Library",
+    "key": "",
+    "mods": [],
+    "submenu": {
+     "title": "Library",
+     "uid": 1241,
+     "items": [
+      {
+       "title": "Columns",
+       "key": "",
+       "mods": [],
+       "submenu": {
+        "title": "Columns",
+        "uid": 807,
+        "items": [
+         {
+          "title": "TITLE",
+          "key": "",
+          "mods": [],
+          "action": "toggleTitle:",
+          "tag": 1,
+          "state": 1
+         },
+         {
+          "title": "ARTIST",
+          "key": "",
+          "mods": [],
+          "action": "toggleArtist:",
+          "tag": 2,
+          "state": 1
+         },
+         {
+          "title": "BPM",
+          "key": "",
+          "mods": [],
+          "action": "toggleBpm:",
+          "tag": 3,
+          "state": 1
+         },
+         {
+          "title": "ALBUM",
+          "key": "",
+          "mods": [],
+          "action": "toggleAlbum:",
+          "tag": 4,
+          "state": 1
+         },
+         {
+          "title": "TIME",
+          "key": "",
+          "mods": [],
+          "action": "toggleTime:",
+          "tag": 5,
+          "state": 1
+         },
+         {
+          "title": "KEY",
+          "key": "",
+          "mods": [],
+          "action": "toggleKey:",
+          "tag": 6,
+          "state": 1
+         },
+         {
+          "title": "KEYCODE",
+          "key": "",
+          "mods": [],
+          "action": "toggleKeyCode:",
+          "tag": 7,
+          "state": 1
+         },
+         {
+          "title": "TWEAKED",
+          "key": "",
+          "mods": [],
+          "action": "toggleTweaked:",
+          "tag": 8
+         },
+         {
+          "title": "YEAR",
+          "key": "",
+          "mods": [],
+          "action": "toggleYear:",
+          "tag": 9
+         },
+         {
+          "title": "GENRE",
+          "key": "",
+          "mods": [],
+          "action": "toggleGenre:",
+          "tag": 10
+         },
+         {
+          "title": "COMPOSER",
+          "key": "",
+          "mods": [],
+          "action": "toggleComposer:",
+          "tag": 11
+         },
+         {
+          "title": "FILENAME",
+          "key": "",
+          "mods": [],
+          "action": "toggleFileName:",
+          "tag": 12
+         },
+         {
+          "title": "DATE ADDED",
+          "key": "",
+          "mods": [],
+          "action": "toggleDateAdded:",
+          "tag": 13
+         },
+         {
+          "title": "RATING",
+          "key": "",
+          "mods": [],
+          "action": "toggleRating:",
+          "tag": 14
+         },
+         {
+          "title": "COMMENTS",
+          "key": "",
+          "mods": [],
+          "action": "toggleComments:",
+          "tag": 15
+         },
+         {
+          "title": "TRACK",
+          "key": "",
+          "mods": [],
+          "action": "toggleTrack:",
+          "tag": 16
+         },
+         {
+          "title": "BITRATE",
+          "key": "",
+          "mods": [],
+          "action": "toggleBitRate:",
+          "tag": 17
+         },
+         {
+          "title": "LABEL",
+          "key": "",
+          "mods": [],
+          "action": "toggleLabel:",
+          "tag": 18
+         },
+         {
+          "title": "USER 1",
+          "key": "",
+          "mods": [],
+          "action": "toggleUser1:",
+          "tag": 19
+         },
+         {
+          "title": "USER 2",
+          "key": "",
+          "mods": [],
+          "action": "toggleUser2:",
+          "tag": 20,
+          "state": 1
+         },
+         {
+          "title": "PLAYLIST",
+          "key": "",
+          "mods": [],
+          "action": "togglePlaylist:"
+         }
+        ]
+       }
+      },
+      {
+       "separator": true
+      },
+      {
+       "title": "New Category...",
+       "key": "",
+       "mods": [],
+       "action": "newCategory:"
+      },
+      {
+       "title": "Delete Category...",
+       "key": "",
+       "mods": [],
+       "action": "deleteCategory:"
+      },
+      {
+       "separator": true
+      },
+      {
+       "title": "Clean Up Library...",
+       "key": "",
+       "mods": [],
+       "action": "cleanUpLibrary:"
+      },
+      {
+       "title": "Import Library...",
+       "key": "",
+       "mods": [],
+       "action": "importLibrary:"
+      },
+      {
+       "title": "Export Library...",
+       "key": "",
+       "mods": [],
+       "action": "exportLibrary:"
+      },
+      {
+       "title": "Import from iTunes...",
+       "key": "",
+       "mods": [],
+       "action": "importITunes:"
+      },
+      {
+       "title": "Smart Playlist...",
+       "key": "",
+       "mods": [],
+       "action": "smartPlaylist:"
+      }
+     ]
+    }
+   },
+   {
+    "title": "Playback",
+    "key": "",
+    "mods": [],
+    "submenu": {
+     "title": "Playback",
+     "uid": 1300,
+     "items": [
+      {
+       "title": "Play/Pause",
+       "key": "",
+       "mods": [],
+       "action": "playPause:"
+      },
+      {
+       "title": "Stop",
+       "key": "",
+       "mods": [],
+       "action": "stop:"
+      },
+      {
+       "title": "Jog Backward",
+       "key": "",
+       "mods": [],
+       "action": "jogBackward:"
+      },
+      {
+       "title": "Jog Forward",
+       "key": "",
+       "mods": [],
+       "action": "jogForward:"
+      },
+      {
+       "separator": true
+      },
+      {
+       "title": "Mix Now",
+       "key": "",
+       "mods": [],
+       "action": "mixNow:"
+      },
+      {
+       "separator": true
+      },
+      {
+       "title": "Previous Track",
+       "key": "",
+       "mods": [],
+       "action": "previousTrack:"
+      },
+      {
+       "title": "Next Track",
+       "key": "",
+       "mods": [],
+       "action": "nextTrack:"
+      },
+      {
+       "separator": true
+      },
+      {
+       "title": "Drag Tempo",
+       "key": "[",
+       "mods": [],
+       "action": "dragTempo:"
+      },
+      {
+       "title": "Push Tempo",
+       "key": "]",
+       "mods": [],
+       "action": "pushTempo:"
+      },
+      {
+       "separator": true
+      },
+      {
+       "title": "Perform/Pause",
+       "key": "",
+       "mods": [],
+       "action": "performPause:"
+      },
+      {
+       "title": "Fade and Cue Next",
+       "key": "",
+       "mods": [],
+       "action": "stopAndCueNext:"
+      },
+      {
+       "separator": true
+      },
+      {
+       "title": "Mix Performance Now",
+       "key": "",
+       "mods": [],
+       "action": "mixPerformanceNow:"
+      },
+      {
+       "title": "Reset Performance Position",
+       "key": "r",
+       "mods": [
+        "cmd"
+       ],
+       "action": "resetPerformancePosition:"
+      }
+     ]
+    }
+   },
+   {
+    "title": "Tools",
+    "key": "",
+    "mods": [],
+    "submenu": {
+     "title": "Tools",
+     "uid": 1360,
+     "items": [
+      {
+       "title": "Transitions",
+       "key": "",
+       "mods": [],
+       "submenu": {
+        "title": "Transitions",
+        "uid": 833,
+        "items": [
+         {
+          "title": "Item",
+          "key": "",
+          "mods": []
+         }
+        ]
+       }
+      },
+      {
+       "separator": true
+      },
+      {
+       "title": "Snap To Beat",
+       "key": "B",
+       "mods": [
+        "cmd",
+        "shift"
+       ],
+       "action": "snapToBeat:"
+      },
+      {
+       "title": "Snap To",
+       "key": "",
+       "mods": [],
+       "submenu": {
+        "title": "Snap To",
+        "uid": 1576,
+        "items": [
+         {
+          "title": "8 Measures",
+          "key": "",
+          "mods": [],
+          "action": "snapTo8Measures:"
+         },
+         {
+          "title": "4 Measures",
+          "key": "",
+          "mods": [],
+          "action": "snapTo4Measures:"
+         },
+         {
+          "title": "2 Measures",
+          "key": "",
+          "mods": [],
+          "action": "snapTo2Measures:"
+         },
+         {
+          "title": "1 Measure",
+          "key": "",
+          "mods": [],
+          "action": "snapTo1Measure:"
+         },
+         {
+          "title": "Half Note",
+          "key": "",
+          "mods": [],
+          "action": "snapToHalfNote:"
+         },
+         {
+          "title": "Quarter Note",
+          "key": "",
+          "mods": [],
+          "action": "snapToQuarterNote:"
+         },
+         {
+          "title": "Eighth Note",
+          "key": "",
+          "mods": [],
+          "action": "snapToEighthNote:"
+         },
+         {
+          "title": "Sixteenth Note",
+          "key": "",
+          "mods": [],
+          "action": "snapToSixteenthNote:"
+         }
+        ]
+       }
+      },
+      {
+       "separator": true
+      },
+      {
+       "title": "Add To Category...",
+       "key": "g",
+       "mods": [
+        "ctrl"
+       ],
+       "action": "handleMenuItem:",
+       "tag": 2001
+      },
+      {
+       "title": "Remove From Active Category...",
+       "key": "",
+       "mods": [],
+       "action": "handleMenuItem:",
+       "tag": 2002
+      },
+      {
+       "title": "Find Similar Tracks",
+       "key": "f",
+       "mods": [
+        "ctrl"
+       ],
+       "action": "handleMenuItem:",
+       "tag": 2003
+      },
+      {
+       "separator": true
+      },
+      {
+       "title": "Add Volume Marker",
+       "key": "v",
+       "mods": [],
+       "action": "handleMenuItem:",
+       "tag": 2101
+      },
+      {
+       "title": "Add Treble Marker",
+       "key": "t",
+       "mods": [],
+       "action": "handleMenuItem:",
+       "tag": 2102
+      },
+      {
+       "title": "Add Midrange Marker",
+       "key": "m",
+       "mods": [],
+       "action": "handleMenuItem:",
+       "tag": 2103
+      },
+      {
+       "title": "Add Bass Marker",
+       "key": "b",
+       "mods": [],
+       "action": "handleMenuItem:",
+       "tag": 2104
+      },
+      {
+       "separator": true
+      },
+      {
+       "title": "Add Label Marker",
+       "key": "l",
+       "mods": [],
+       "action": "handleMenuItem:",
+       "tag": 2105
+      },
+      {
+       "title": "Add Effects Parameter Marker",
+       "key": "e",
+       "mods": [],
+       "action": "handleMenuItem:",
+       "tag": 2106
+      },
+      {
+       "separator": true
+      },
+      {
+       "title": "Add Loop Start Marker",
+       "key": "9",
+       "mods": [],
+       "action": "handleMenuItem:",
+       "tag": 2107
+      },
+      {
+       "title": "Add Loop End Marker",
+       "key": "0",
+       "mods": [],
+       "action": "handleMenuItem:",
+       "tag": 2108
+      },
+      {
+       "separator": true
+      },
+      {
+       "title": "Split Segment at Cursor",
+       "key": "s",
+       "mods": [],
+       "action": "handleMenuItem:",
+       "tag": 2109
+      },
+      {
+       "title": "Reverse",
+       "key": "",
+       "mods": [],
+       "action": "handleMenuItem:",
+       "tag": 2110
+      },
+      {
+       "separator": true
+      },
+      {
+       "title": "Set As Next Performance Track",
+       "key": "n",
+       "mods": [
+        "ctrl"
+       ],
+       "action": "handleMenuItem:",
+       "tag": 2201
+      },
+      {
+       "separator": true
+      },
+      {
+       "title": "Tweaks...",
+       "key": "w",
+       "mods": [
+        "ctrl"
+       ],
+       "action": "handleMenuItem:",
+       "tag": 2202
+      },
+      {
+       "title": "Quick Save Tweak",
+       "key": "s",
+       "mods": [
+        "ctrl"
+       ],
+       "action": "handleMenuItem:",
+       "tag": 2203
+      },
+      {
+       "separator": true
+      },
+      {
+       "title": "Edit Tag...",
+       "key": "e",
+       "mods": [
+        "ctrl"
+       ],
+       "action": "handleMenuItem:",
+       "tag": 2204
+      },
+      {
+       "title": "Adjust Track Settings...",
+       "key": "t",
+       "mods": [
+        "ctrl"
+       ],
+       "action": "handleMenuItem:",
+       "tag": 2205
+      },
+      {
+       "separator": true
+      },
+      {
+       "title": "Audio Output Configuration...",
+       "key": "",
+       "mods": [],
+       "action": "doAudioSetupDialog:"
+      }
+     ]
+    }
+   },
+   {
+    "title": "Window",
+    "key": "",
+    "mods": [],
+    "submenu": {
+     "title": "Window",
+     "uid": 1130,
+     "items": [
+      {
+       "title": "Minimize",
+       "key": "m",
+       "mods": [
+        "cmd"
+       ],
+       "action": "performMiniaturize:"
+      },
+      {
+       "title": "Zoom",
+       "key": "",
+       "mods": [],
+       "action": "performZoom:"
+      },
+      {
+       "separator": true
+      },
+      {
+       "title": "Bring All to Front",
+       "key": "",
+       "mods": [],
+       "action": "arrangeInFront:"
+      }
+     ]
+    }
+   },
+   {
+    "title": "Help",
+    "key": "",
+    "mods": [],
+    "submenu": {
+     "title": "Help",
+     "uid": 688,
+     "items": [
+      {
+       "title": "MixMeister Fusion Help",
+       "key": "?",
+       "mods": [
+        "cmd"
+       ],
+       "action": "help:"
+      },
+      {
+       "separator": true
+      },
+      {
+       "title": "Buy Now...",
+       "key": "",
+       "mods": [],
+       "action": "helpBuyNow:"
+      },
+      {
+       "title": "Register Online...",
+       "key": "",
+       "mods": [],
+       "action": "helpRegisterOnline:"
+      },
+      {
+       "title": "Check For Updates...",
+       "key": "",
+       "mods": [],
+       "action": "helpCheckForUpdates:"
+      },
+      {
+       "separator": true
+      },
+      {
+       "title": "Support...",
+       "key": "",
+       "mods": [],
+       "action": "helpSupport:"
+      }
+     ]
+    }
+   }
+  ]
+ }
+]
