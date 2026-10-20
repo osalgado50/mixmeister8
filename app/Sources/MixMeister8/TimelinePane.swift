@@ -70,6 +70,8 @@ final class TimelinePane: NSView {
 
         scroll.documentView = timeline
         scroll.hasHorizontalScroller = true
+        scroll.scrollerStyle = .overlay          // flota sobre la línea de tiempo: sin hueco abajo
+        scroll.autohidesScrollers = true
         scroll.hasVerticalScroller = false
         scroll.drawsBackground = false
         scroll.translatesAutoresizingMaskIntoConstraints = false
@@ -96,7 +98,7 @@ final class TimelinePane: NSView {
             scroll.topAnchor.constraint(equalTo: bar.bottomAnchor), scroll.leadingAnchor.constraint(equalTo: stripControls.trailingAnchor),
             scroll.trailingAnchor.constraint(equalTo: meters.leadingAnchor), scroll.bottomAnchor.constraint(equalTo: bottomAnchor),
             timeline.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
-            timeline.heightAnchor.constraint(equalTo: scroll.contentView.heightAnchor, constant: -14),
+            timeline.heightAnchor.constraint(equalTo: scroll.contentView.heightAnchor),
             timeline.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
         ])
         NotificationCenter.default.addObserver(self, selector: #selector(update), name: .playlistChanged, object: nil)
@@ -178,7 +180,7 @@ final class StripControls: FillView {
     required init?(coder: NSCoder) { fatalError() }
     override func draw(_ r: NSRect) {
         super.draw(r)
-        let h = (bounds.height - TimelineView.rulerHeight - TimelineView.tempoLaneHeight - 14) / CGFloat(strips)
+        let h = (bounds.height - TimelineView.rulerHeight - TimelineView.tempoLaneHeight) / CGFloat(strips)
         let a: [NSAttributedString.Key: Any] = [.font: Theme.font(9, .semibold), .foregroundColor: Theme.textDim]
         for k in 0..<strips {
             let y = TimelineView.rulerHeight + CGFloat(k) * h
