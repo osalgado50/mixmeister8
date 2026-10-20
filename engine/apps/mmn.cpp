@@ -1,6 +1,7 @@
 // mmn — línea de comandos del motor MMStudio Next.
 #include "mmn/analysis.hpp"
 #include "mmn/audio.hpp"
+#include "mmn/key.hpp"
 #include "mmn/mxm.hpp"
 
 #include <chrono>
@@ -19,6 +20,7 @@ namespace {
 int usage() {
     std::puts(
         "mmn analyze [--json] fichero...     tempo, primer tiempo y compás\n"
+        "mmn key [--chroma] fichero...       tonalidad y Camelot (con --chroma, el cromagrama)\n"
         "mmn mxm fichero.mxm                 lee un análisis de MixMeister\n"
         "mmn compare audio fichero.mxm       nuevo frente a MixMeister\n"
         "mmn tsv audio fichero.mxm           una línea TSV para la suite de validación");
@@ -226,6 +228,26 @@ int cmd_leveldiag(const char* audio, const char* mxm) {
     return 0;
 }
 
+
+int cmd_key(int argc, char** argv) {
+    bool chroma = false;
+    for (int i = 2; i < argc; ++i) {
+        if (!std::strcmp(argv[i], "--chroma")) { chroma = true; continue; }
+        try {
+            const Buffer b = read_audio(argv[i]);
+            const Chroma c = chromagram(to_mono(b), b.sample_rate);
+            const Key k = estimate_key(c);
+            std::printf("%s\t%s\t%s\t%.3f", base(argv[i]).c_str(), k.name().c_str(), k.camelot().c_str(), k.margin);
+            if (chroma)
+                for (double v : c) std::printf("\t%.5f", v);
+            std::puts("");
+        } catch (const std::exception& e) {
+            std::fprintf(stderr, "%s: %s\n", argv[i], e.what());
+        }
+    }
+    return 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -233,6 +255,7 @@ int main(int argc, char** argv) {
     try {
         const std::string c = argv[1];
         if (c == "analyze") return cmd_analyze(argc, argv);
+        if (c == "key") return cmd_key(argc, argv);
         if (c == "mxm" && argc == 3) return cmd_mxm(argv[2]);
         if (c == "compare" && argc == 4) return cmd_compare(argv[2], argv[3], false);
         if (c == "tsv" && argc == 4) return cmd_compare(argv[2], argv[3], true);
