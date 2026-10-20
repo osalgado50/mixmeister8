@@ -16,12 +16,12 @@ de su manual (120 págs.) y de experimentos en MixMeister Studio 7.8 instalado e
 |---|---|---|
 | **0. Formatos** | `.mmp` lectura/escritura sin pérdidas; catálogo; `.mxm`; preferencias | **hecho**: 652/652 listas idénticas al byte, también pasando por la API |
 | **1. Esqueleto** | menús exactos (generados del nib), ventana con biblioteca/lista/línea de tiempo/rack, biblioteca desde el catálogo de MixMeister, abrir/guardar/añadir listas, recientes, columnas y anchuras heredadas, carriles 2/4/6/8, zoom, regla, Snap To, transiciones por pista, deshacer | **hecho** (ver abajo) |
-| 2. Reproducción | motor en tiempo real (AVAudioEngine + motor C++): Play/Pause, Stop, Jog, Previous/Next, cursor, medidores; mapa de tempo con rampas (BPM de la lista exacto); las 13 transiciones aplicadas | siguiente |
+| 2. Reproducción | Play/Pause, Stop, Jog, Previous/Next, Mix Now, preescucha, medidores, salida elegible (Audio Output Configuration), volumen/EQ/tono/tempo por marcadores, rampas de tempo dentro de cada pista, limitador del master | **hecho**, probado en el Mac Pro (7 pasos de transporte); pendiente: arrastre de tempo en transiciones beatmix, segmentos invertidos |
 | 3. Edición de la línea de tiempo | arrastrar pistas y anclas, marcadores de volumen/EQ/etiqueta/bucle/efecto (añadir, mover, editar, borrar), Split, Reverse, Solo, overlays, tempo markers en la regla, Snap | |
 | 4. Diálogos | Edit Tag (tap, ½×, 2×, tonalidad), Track Settings, Tweaks y Quick Save, Smart Playlist, Find Similar, categorías, Clean Up/Import/Export Library, Add Files (análisis con el motor), Preferences | |
 | 5. Song Slicer y efectos | Beat Slicer con metrónomo; Effects Rack con efectos propios equivalentes a los del original (los AIR/NewBlue no se pueden incluir); parámetros automatizados | |
 | 6. Directo y salida | salida doble (principal y preescucha), Perform/Pause, Fade and Cue Next, Mix Performance Now, Push/Drag Tempo, MIDI Learn y plantillas, MIDI clock | |
-| 7. Exportar | a fichero (WAV/AIFF/MP3/AAC, por canciones o por etiquetas), CD, Mobile Mix, imprimir biblioteca y lista | |
+| 7. Exportar | a fichero (AIFF/WAV/AAC, por canciones o por etiquetas), a Música (iTunes), CD de audio sin pausas (CUE/BIN + grabadora del sistema), botones de arriba a la derecha de la lista; imprimir biblioteca y lista | **hecho** salvo MP3 (macOS no trae codificador) e imprimir; la grabación física del CD falta probarla con una grabadora conectada |
 
 ## Fase 1 — lo que ya hace la app
 
@@ -41,6 +41,15 @@ de su manual (120 págs.) y de experimentos en MixMeister Studio 7.8 instalado e
 - **Comprobado con Spinning310** (24 pistas) frente a MixMeister 7.8: tonalidades iguales, BPM igual
   en 19 de 21 filas visibles, disposición igual, duración total 47:06 frente a 47:34. Lo que
   falta en las dos últimas cifras son las rampas de tempo (fase 2).
+
+## Tempo (barra de tempos y Master BPM)
+
+- Barra de tempos bajo los carriles: marcadores de tempo (verde) y de tempo original (verde apagado);
+  clic derecho: Add Tempo Marker / Add Original Tempo Marker; sobre un marcador: Edit / Delete; doble
+  clic: editar el valor.
+- Master BPM: el tempo en el cursor; flechas (0,1 BPM) o tecleado: deja marcadores de tempo en el cursor.
+- Columna BPM de la lista: tempo a mitad de la pista. Spinning310: 19 de 21 filas iguales a MixMeister
+  7.8 (las filas 13 y 21 dependen del arrastre de tempo en las transiciones beatmix).
 
 ## Pendiente de averiguar (por experimento)
 

@@ -56,7 +56,7 @@ enum Exporter {
         g.update(at: 0)
         try engine.start()
         g.start(at: nil)
-        defer { g.teardown(); engine.stop() }
+        defer { engine.stop(); g.teardown() }   // primero parar: con el motor en marcha no se puede desmontar
         let buf = AVAudioPCMBuffer(pcmFormat: engine.manualRenderingFormat, frameCapacity: 1024)!
         let totalFrames = AVAudioFramePosition((layout.total + 0.5) * sampleRate)
         var done: AVAudioFramePosition = 0

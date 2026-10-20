@@ -267,10 +267,10 @@ final class Player {
 
     private func stopNodes() {
         timer?.invalidate(); timer = nil
-        graph?.teardown(); graph = nil
-        // El motor se para siempre: con el motor en marcha, los reproductores recién conectados no
-        // arrancan. En play() se vuelve a arrancar.
+        // El motor se para siempre (y antes de desmontar el grafo): con el motor en marcha no se
+        // puede desconectar el limitador, y los reproductores recién conectados no arrancan.
         engine.stop()
+        graph?.teardown(); graph = nil
         engine.reset()
         isPlaying = false
         peakL = 0; peakR = 0
