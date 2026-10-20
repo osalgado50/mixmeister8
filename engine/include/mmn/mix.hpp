@@ -3,6 +3,8 @@
 #include "mmn/analysis.hpp"
 #include "mmn/audio.hpp"
 
+#include <vector>
+
 namespace mmn {
 
 /// Lo que el mezclador necesita de cada pista.
@@ -21,6 +23,16 @@ struct TransitionInfo {
     double total_s = 0;      ///< duración total de la mezcla
     double bpm_from = 0, bpm_to = 0;
 };
+
+/// Una sesión: cada pista entra por su ventana de entrada mientras la anterior sale por su
+/// ventana de salida (mismas reglas que render_transition), todo sobre una sola línea de
+/// tiempo. `marks` recibe, por pista, el instante de la salida donde empieza a sonar.
+struct SessionInfo {
+    std::vector<double> starts;          ///< por pista: inicio en la mezcla (s)
+    std::vector<TransitionInfo> joins;   ///< por transición
+    double total_s = 0;
+};
+Buffer render_session(const std::vector<Track>& tracks, SessionInfo* info = nullptr);
 
 /// A suena a su tempo hasta el inicio de su ventana de salida. Durante `phrase` tiempos A (su
 /// ventana de salida) y B (su ventana de entrada) suenan juntas, tiempo con tiempo, con el

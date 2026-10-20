@@ -3,6 +3,9 @@
 #include "mmn/audio.hpp"
 #include "mmn/key.hpp"
 #include "mmn/mix.hpp"
+#include "mmn/mmp.hpp"
+
+#include <fstream>
 #include "mmn/mxm.hpp"
 
 #include <chrono>
@@ -23,6 +26,7 @@ int usage() {
         "mmn analyze [--json] fichero...     tempo, primer tiempo y compás\n"
         "mmn key [--chroma] fichero...       tonalidad y Camelot (con --chroma, el cromagrama)\n"
         "mmn transicion a b salida.wav       mezcla A → B, cuadrada a tiempo y a compás\n"
+        "mmn sesion lista.mmp salida.wav [carpeta...]   renderiza una sesión de MixMeister (+ .cue)\n"
         "mmn mxm fichero.mxm                 lee un análisis de MixMeister\n"
         "mmn compare audio fichero.mxm       nuevo frente a MixMeister\n"
         "mmn tsv audio fichero.mxm           una línea TSV para la suite de validación");
@@ -282,6 +286,46 @@ int cmd_transicion(const char* fa, const char* fb, const char* out) {
     return 0;
 }
 
+
+int cmd_sesion(int argc, char** argv) {
+    const std::string list = argv[2], out = argv[3];
+    std::vector<std::string> dirs;
+    for (int i = 4; i < argc; ++i) dirs.emplace_back(argv[i]);
+    const auto items = read_mmp(list);
+    std::vector<Track> tracks;
+    std::vector<std::string> names;
+    for (const auto& it : items) {
+        const std::string p = resolve_track(it.path, dirs);
+        if (p.empty()) {
+            std::fprintf(stderr, "no encuentro: %s (se salta)\n", it.path.c_str());
+            continue;
+        }
+        tracks.push_back(load_track(p));
+        names.push_back(base(p));
+        std::printf("  %2zu. %-40s %7.2f BPM  entrada t%ld  salida t%ld\n", tracks.size(), names.back().c_str(),
+                    tracks.back().grid.bpm, tracks.back().windows.entry_beat, tracks.back().windows.exit_beat);
+    }
+    if (tracks.empty()) {
+        std::fprintf(stderr, "ninguna pista encontrada\n");
+        return 1;
+    }
+    SessionInfo info;
+    const Buffer mix = render_session(tracks, &info);
+    write_wav16(out, mix);
+    // Hoja CUE con el inicio de cada pista (minutos:segundos:fotogramas de 1/75 s).
+    std::string cue = out.substr(0, out.find_last_of('.')) + ".cue";
+    std::ofstream c(cue);
+    c << "FILE \"" << base(out) << "\" WAVE\n";
+    for (std::size_t i = 0; i < tracks.size(); ++i) {
+        const auto frames = static_cast<long>(std::llround(info.starts[i] * 75));
+        char ts[32];
+        std::snprintf(ts, sizeof ts, "%02ld:%02ld:%02ld", frames / 75 / 60, (frames / 75) % 60, frames % 75);
+        c << "  TRACK " << (i < 9 ? "0" : "") << i + 1 << " AUDIO\n    TITLE \"" << names[i] << "\"\n    INDEX 01 " << ts << "\n";
+    }
+    std::printf("sesión: %zu pistas, %.1f s → %s (+ %s)\n", tracks.size(), info.total_s, out.c_str(), base(cue).c_str());
+    return 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -291,6 +335,7 @@ int main(int argc, char** argv) {
         if (c == "analyze") return cmd_analyze(argc, argv);
         if (c == "key") return cmd_key(argc, argv);
         if (c == "transicion" && argc == 5) return cmd_transicion(argv[2], argv[3], argv[4]);
+        if (c == "sesion" && argc >= 4) return cmd_sesion(argc, argv);
         if (c == "mxm" && argc == 3) return cmd_mxm(argv[2]);
         if (c == "compare" && argc == 4) return cmd_compare(argv[2], argv[3], false);
         if (c == "tsv" && argc == 4) return cmd_compare(argv[2], argv[3], true);

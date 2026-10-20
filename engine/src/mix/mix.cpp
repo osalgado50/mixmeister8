@@ -92,45 +92,81 @@ void limit(Buffer& b, double ceiling = 0.98) {
 
 }  // namespace
 
-Buffer render_transition(const Track& a, const Track& bt, TransitionInfo* info) {
-    const int sr = a.audio.sample_rate;
-    const Buffer b_audio = to_channels(to_rate(bt.audio, sr), a.audio.channels());
-    const double pa = a.grid.period(), pb = bt.grid.period();
-    const int L = a.windows.phrase;
-    const Ramp ramp{a.grid.bpm, bt.grid.bpm, static_cast<double>(L)};
-    const double t0 = a.grid.beat_time(a.windows.exit_beat);   // en A y en la salida: A suena tal cual
-    const double tov = ramp.seconds_at(L);                        // duración del solape
-    const double b_in = bt.grid.beat_time(bt.windows.entry_beat); // inicio de la entrada de B
-    const double b_after = b_in + L * pb;                         // donde B sigue sola
-    const double b_rest = std::max(0.0, b_audio.seconds() - b_after);
-    const double total = t0 + tov + b_rest;
-
-    // A: identidad hasta t0, luego sigue la rampa tiempo a tiempo.
-    const TimeMap map_a = [&](double t) { return t < t0 ? t : t0 + ramp.beat_at(t - t0) * pa; };
-    // B (en su tiempo local u = t - t0): la rampa durante el solape, luego a su tempo.
-    const TimeMap map_b = [&](double u) { return u < tov ? b_in + ramp.beat_at(u) * pb : b_after + (u - tov); };
-    const Buffer sa = stretch(a.audio, map_a, t0 + tov);
-    const Buffer sb = stretch(b_audio, map_b, tov + b_rest);
-
+Buffer render_session(const std::vector<Track>& tracks, SessionInfo* info) {
     Buffer out;
-    out.sample_rate = sr;
-    const auto n = static_cast<std::size_t>(std::llround(total * sr));
-    out.ch.assign(static_cast<std::size_t>(a.audio.channels()), std::vector<float>(n, 0.0f));
-    const auto i0 = static_cast<std::size_t>(std::llround(t0 * sr));
-    for (std::size_t c = 0; c < out.ch.size(); ++c) {
-        for (std::size_t i = 0; i < sa.frames() && i < n; ++i) {
-            double g = 1.0;
-            if (i >= i0) g = std::cos(0.5 * std::numbers::pi * std::min(1.0, ramp.beat_at(double(i - i0) / sr) / L));
-            out.ch[c][i] += static_cast<float>(g) * sa.ch[c][i];
-        }
-        for (std::size_t j = 0; j < sb.frames() && i0 + j < n; ++j) {
-            const double u = double(j) / sr;
-            const double g = u < tov ? std::sin(0.5 * std::numbers::pi * ramp.beat_at(u) / L) : 1.0;
-            out.ch[c][i0 + j] += static_cast<float>(g) * sb.ch[c][j];
-        }
+    if (tracks.empty()) return out;
+    const int sr = tracks.front().audio.sample_rate;
+    const int nch = tracks.front().audio.channels();
+    const std::size_t n = tracks.size();
+    std::vector<Buffer> audio;
+    for (const auto& t : tracks) audio.push_back(to_channels(to_rate(t.audio, sr), nch));
+
+    // Línea de tiempo. Para la pista i: entra en m[i-1] (salvo la primera, que empieza en 0),
+    // y la transición i→i+1 empieza en m[i] y dura tov[i].
+    std::vector<Ramp> ramp;
+    std::vector<double> m(n, 0.0), tov(n, 0.0), start(n, 0.0);
+    for (std::size_t i = 0; i + 1 < n; ++i)
+        ramp.push_back({tracks[i].grid.bpm, tracks[i + 1].grid.bpm, static_cast<double>(tracks[i].windows.phrase)}),
+            tov[i] = ramp.back().seconds_at(tracks[i].windows.phrase);
+    auto entry_t = [&](std::size_t i) { return tracks[i].grid.beat_time(tracks[i].windows.entry_beat); };
+    auto exit_t = [&](std::size_t i) { return tracks[i].grid.beat_time(tracks[i].windows.exit_beat); };
+    auto after_t = [&](std::size_t i) {  // donde la pista i sigue sola tras su entrada
+        return entry_t(i) + tracks[i - 1].windows.phrase * tracks[i].grid.period();
+    };
+    for (std::size_t i = 0; i < n; ++i) {
+        if (i == 0) start[i] = 0, m[i] = exit_t(0);
+        else start[i] = m[i - 1], m[i] = m[i - 1] + tov[i - 1] + std::max(0.0, exit_t(i) - after_t(i));
     }
-    limit(out);  // los dos temas van en fase en el solape: sin esto, satura
-    if (info) *info = {t0, tov, total, a.grid.bpm, bt.grid.bpm};
+    // Fin de la mezcla: la última pista suena sola desde que termina su entrada hasta su final.
+    const double total = n == 1 ? audio[0].seconds()
+                                : m[n - 2] + tov[n - 2] + std::max(0.0, audio[n - 1].seconds() - after_t(n - 1));
+
+    out.sample_rate = sr;
+    const auto nout = static_cast<std::size_t>(std::llround(total * sr));
+    out.ch.assign(static_cast<std::size_t>(nch), std::vector<float>(nout, 0.0f));
+
+    for (std::size_t i = 0; i < n; ++i) {
+        const Track& t = tracks[i];
+        const double p = t.grid.period();
+        const double s0 = start[i];
+        const double e0 = (i + 1 < n) ? m[i] + tov[i] : total;
+        // mapa local: u = tiempo de mezcla - s0 → tiempo de la pista
+        const TimeMap map = [&, i, p](double u) {
+            const double tm = s0 + u;
+            if (i > 0 && tm < start[i] + tov[i - 1]) return entry_t(i) + ramp[i - 1].beat_at(tm - start[i]) * p;
+            if (i + 1 < n && tm >= m[i]) return exit_t(i) + ramp[i].beat_at(tm - m[i]) * p;
+            const double anchor_mix = i == 0 ? 0.0 : start[i] + tov[i - 1];
+            const double anchor_src = i == 0 ? 0.0 : after_t(i);
+            return anchor_src + (tm - anchor_mix);
+        };
+        const Buffer st = stretch(audio[i], map, e0 - s0);
+        const auto off = static_cast<std::size_t>(std::llround(s0 * sr));
+        for (std::size_t c = 0; c < out.ch.size(); ++c)
+            for (std::size_t j = 0; j < st.frames() && off + j < nout; ++j) {
+                const double tm = s0 + double(j) / sr;
+                double g = 1.0;
+                if (i > 0 && tm < start[i] + tov[i - 1])
+                    g *= std::sin(0.5 * std::numbers::pi * std::min(1.0, ramp[i - 1].beat_at(tm - start[i]) / ramp[i - 1].beats));
+                if (i + 1 < n && tm >= m[i])
+                    g *= std::cos(0.5 * std::numbers::pi * std::min(1.0, ramp[i].beat_at(tm - m[i]) / ramp[i].beats));
+                out.ch[c][off + j] += static_cast<float>(g) * st.ch[c][j];
+            }
+    }
+    limit(out);  // en los solapes los temas van en fase: sin esto, satura
+    if (info) {
+        info->starts = start;
+        info->joins.clear();
+        for (std::size_t i = 0; i + 1 < n; ++i) info->joins.push_back({m[i], tov[i], 0.0, tracks[i].grid.bpm, tracks[i + 1].grid.bpm});
+        info->total_s = out.seconds();
+        for (auto& j : info->joins) j.total_s = info->total_s;
+    }
+    return out;
+}
+
+Buffer render_transition(const Track& a, const Track& bt, TransitionInfo* info) {
+    SessionInfo si;
+    Buffer out = render_session({a, bt}, &si);
+    if (info) *info = si.joins.front();
     return out;
 }
 

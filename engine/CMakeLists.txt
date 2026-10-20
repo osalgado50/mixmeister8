@@ -15,7 +15,8 @@ add_library(mmn
   src/analysis/key.cpp
   src/mix/stretch.cpp
   src/mix/mix.cpp
-  src/formats/mxm.cpp)
+  src/formats/mxm.cpp
+  src/formats/mmp.cpp)
 target_include_directories(mmn PUBLIC include PRIVATE third_party/minimp3)
 if(APPLE)
   # AAC/M4A y demás formatos del sistema vía Core Audio
@@ -34,7 +35,7 @@ set_target_properties(mmn_cli PROPERTIES OUTPUT_NAME mmn)
 target_link_libraries(mmn_cli PRIVATE mmn)
 
 enable_testing()
-add_executable(mmn_tests tests/test_main.cpp tests/test_dsp_audio.cpp tests/test_rhythm.cpp tests/test_key.cpp tests/test_stretch.cpp tests/test_mix.cpp)
+add_executable(mmn_tests tests/test_main.cpp tests/test_dsp_audio.cpp tests/test_rhythm.cpp tests/test_key.cpp tests/test_stretch.cpp tests/test_mix.cpp tests/test_mmp.cpp)
 target_include_directories(mmn_tests PRIVATE third_party/doctest)
 target_link_libraries(mmn_tests PRIVATE mmn)
 add_test(NAME mmn_tests COMMAND mmn_tests)
