@@ -133,6 +133,87 @@ double phase_score(const OnsetEnvelope& e, double t0, double P) {
     return s;
 }
 
+
+std::array<std::array<double, kBarFeatures>, 4> bar_features(const OnsetEnvelope& e, double b0, double P,
+                                                             long first_sounding) {
+    std::array<std::array<double, kBarFeatures>, 4> out{};
+    const std::size_t nb = e.n_bands;
+    if (!nb || P <= 0) return out;
+    const std::size_t frames = e.bands.size() / nb;
+    std::vector<int> group(nb);
+    std::array<int, 4> members{};
+    for (std::size_t b = 0; b < nb; ++b) {
+        const double lo = 30.0 * std::pow(8000.0 / 30.0, double(b) / double(nb));
+        const double hi = 30.0 * std::pow(8000.0 / 30.0, double(b + 1) / double(nb));
+        const double c = std::sqrt(lo * hi);
+        group[b] = c < 90 ? 0 : c < 250 ? 1 : c < 2000 ? 2 : 3;
+        ++members[group[b]];
+    }
+    auto B = [&](std::size_t f, std::size_t b) { return static_cast<double>(e.bands[f * nb + b]); };
+    auto frame_of = [&](double t) {
+        return static_cast<std::size_t>(std::clamp((t - e.frame_offset_s) / e.hop_s, 0.0, double(frames - 1)));
+    };
+    // Por tiempo: ataque por grupo, espectro sostenido y espectro completo del tiempo.
+    struct Beat { std::array<double, 4> flux{}; std::vector<double> sustain, whole; };
+    std::vector<Beat> beats;
+    for (double t = b0; t + P <= e.duration(); t += P) {
+        Beat bt;
+        bt.sustain.assign(nb, 0.0);
+        bt.whole.assign(nb, 0.0);
+        // Pico del ataque: con ventana de ~46 ms el flujo de un golpe en t culmina antes de t,
+        // así que se busca de t-30 ms a t+12 ms.
+        // Ventana de longitud FIJA: si dependiera del redondeo, a 128 BPM (80,75 marcos por
+        // tiempo) cambiaría de 7 a 8 marcos con un patrón de 4 tiempos, justo el del compás.
+        const auto nwin = static_cast<std::size_t>(std::lround(0.042 / e.hop_s));
+        const std::size_t i0 = frame_of(t - 0.030), i1 = i0 + nwin;
+        if (i0 >= 1 && i1 + 1 < frames)
+            for (std::size_t b = 0; b < nb; ++b) {
+                double fl = 0;
+                for (std::size_t f = i0; f <= i1; ++f) fl = std::max(fl, B(f, b) - B(f - 1, b));
+                bt.flux[group[b]] += fl / members[group[b]];
+            }
+        const auto nbeat = static_cast<std::size_t>(std::max(2.0, std::floor(P / e.hop_s)));  // longitud fija
+        const std::size_t w0 = frame_of(t), w1 = std::min(frames, w0 + nbeat), s0 = w0 + nbeat / 4;
+        for (std::size_t f = w0; f < w1; ++f)
+            for (std::size_t b = 0; b < nb; ++b) {
+                bt.whole[b] += B(f, b) / double(w1 - w0);
+                if (f >= s0) bt.sustain[b] += B(f, b) / double(std::max<std::size_t>(1, w1 - s0));
+            }
+        beats.push_back(std::move(bt));
+    }
+    std::array<std::array<double, kBarFeatures>, 4> acc{};
+    std::array<int, 4> cnt{};
+    for (std::size_t k = 4; k + 4 <= beats.size(); ++k) {
+        std::array<double, kBarFeatures> f{};
+        for (int g = 0; g < 4; ++g) f[g] = beats[k].flux[g];
+        for (std::size_t b = 0; b < nb; ++b)
+            if (group[b] == 1 || group[b] == 2) f[4] += std::max(0.0, beats[k].sustain[b] - beats[k - 1].sustain[b]);
+        double nov = 0, step = 0;
+        for (std::size_t b = 0; b < nb; ++b) {
+            double after = 0, before = 0;
+            for (std::size_t q = 0; q < 4; ++q) after += beats[k + q].whole[b] / 4, before += beats[k - 1 - q].whole[b] / 4;
+            nov += std::max(0.0, after - before);
+            step += (after - before) / double(nb);
+        }
+        f[5] = nov;
+        f[6] = step;
+        const auto j = k % 4;
+        for (std::size_t q = 0; q < kBarFeatures; ++q) acc[j][q] += f[q];
+        ++cnt[j];
+    }
+    for (int j = 0; j < 4; ++j)
+        for (std::size_t q = 0; q < kBarFeatures; ++q) out[j][q] = cnt[j] ? acc[j][q] / cnt[j] : 0.0;
+    // Centrar entre posiciones: lo que importa es qué tiempo destaca, no el nivel de la pista.
+    for (std::size_t q = 0; q + 1 < kBarFeatures; ++q) {
+        double m = 0;
+        for (int j = 0; j < 4; ++j) m += out[j][q] / 4;
+        for (int j = 0; j < 4; ++j) out[j][q] -= m;
+    }
+    const long fs = ((first_sounding % 4) + 4) % 4;
+    for (int j = 0; j < 4; ++j) out[j][7] = (j == fs) ? 1.0 : 0.0;
+    return out;
+}
+
 OnsetEnvelope onset_envelope(std::span<const float> mono, int sr) {
     // Ventana de ~46 ms: la potencia de dos más cercana (no la superior: a 48 kHz serían 85 ms).
     std::size_t n_fft = 1;
@@ -324,7 +405,63 @@ BeatGrid refine_grid(const OnsetEnvelope& e, double bpm0) {
         g.downbeat = static_cast<int>(k % 4);
         g.first_sounding_beat = static_cast<long>(k);
     }
+
+    // 6) Compás por el sonido, con la convención como punto de partida. Regresión softmax
+    //    sobre 3 rasgos por posición: ataque en graves (90-250 Hz), cambio armónico y novedad
+    //    entre compases. Ajustada con `mmn bardiag` sobre 178 pistas reales con su .mxm. Solo
+    //    se aparta de la convención si el sonido la supera por un margen claro.
+    //    Validación cruzada en la biblioteca: 78,6 % (convención: 60 %). Demos no vistas: 9/11
+    //    (convención: 11/11). Rehacer con: tools/ajustar_compas.py
+    {
+        static constexpr std::array<double, 3> w{3.9178, 0.1858, 1.8700};
+        static constexpr std::array<std::size_t, 3> feat{1, 4, 5};
+        constexpr double kMargin = 1.5;
+        const auto f = bar_features(e, b0, P, g.first_sounding_beat);
+        std::array<double, 4> sc{};
+        for (int j = 0; j < 4; ++j)
+            for (std::size_t q = 0; q < feat.size(); ++q) sc[j] += w[q] * f[j][feat[q]];
+        const int best = static_cast<int>(std::max_element(sc.begin(), sc.end()) - sc.begin());
+        if (sc[best] - sc[g.downbeat] > kMargin) g.downbeat = best;
+    }
     return g;
+}
+
+std::vector<LevelCandidate> level_candidates(const OnsetEnvelope& e, const std::vector<TempoCandidate>& cands,
+                                             const TempoOptions& opt) {
+    std::vector<LevelCandidate> out;
+    if (cands.empty()) return out;
+    // Solo la familia del mejor candidato: el pulso decide el nivel, no el tempo. (Con
+    // semicorcheas densas cualquier rejilla encuentra ataques; dejarle elegir entre tempos sin
+    // relación convertía 132 en 105.) Con 3:2 y 2:3: las corcheas de un 174 hacen que la
+    // autocorrelación prefiera 116.
+    const double top = cands.front().bpm;
+    std::vector<double> levels;
+    auto add = [&](double b) {
+        if (b < opt.min_bpm || b > opt.max_bpm) return;
+        for (double l : levels)
+            if (std::abs(l / b - 1) < 0.015) return;
+        levels.push_back(b);
+    };
+    add(top), add(2 * top), add(top / 2), add(top * 1.5), add(top / 1.5);
+    const double ref = grid_score(e, 60.0 / top) + 1e-12;
+    for (double b : levels) {
+        const BeatGrid g = fit_grid(e, b);
+        if (g.bpm <= 0) continue;
+        BeatGrid mid = g;
+        mid.first_beat_s = std::fmod(g.first_beat_s + 0.5 * g.period(), g.period());
+        const double pulse = pulse_strength(e, g) + 1e-9;
+        double low = 0;
+        long n = 0;
+        for (double t = g.first_beat_s; t <= e.duration(); t += g.period(), ++n)
+            low += interp(e.low, (t - e.low_offset_s) / e.hop_s);
+        const double x = std::log2(g.bpm / 120.0);
+        LevelCandidate c;
+        c.bpm = g.bpm;
+        c.f = {std::log(pulse), pulse_strength(e, mid) / pulse, std::log((grid_score(e, g.period()) + 1e-12) / ref),
+               x, x * x, std::log((n ? low / static_cast<double>(n) : 0.0) + 1e-6)};
+        out.push_back(c);
+    }
+    return out;
 }
 
 RhythmAnalysis analyze_rhythm(std::span<const float> mono, int sr, const TempoOptions& opt) {
@@ -332,29 +469,13 @@ RhythmAnalysis analyze_rhythm(std::span<const float> mono, int sr, const TempoOp
     a.env = onset_envelope(mono, sr);
     a.candidates = tempo_candidates(a.env, opt);
     if (a.candidates.empty()) return a;
-    // Nivel métrico. La autocorrelación premia los tempos lentos (en música en bucle todo se
-    // repite cada compás), así que la decisión final la toma el pulso: la fuerza media del
-    // ataque bajo cada tiempo de la rejilla, por el prior de nivel. Se prueban los tres
-    // mejores candidatos y sus dobles y mitades.
-    std::vector<double> levels;  // niveles a probar
-    auto add = [&](double b) {
-        if (b < opt.min_bpm || b > opt.max_bpm) return;
-        for (double l : levels)
-            if (std::abs(l / b - 1) < 0.015) return;
-        levels.push_back(b);
-    };
-    // Solo la familia de octava del mejor candidato: el pulso decide el nivel, no el tempo.
-    // (Con semicorcheas densas cualquier rejilla encuentra ataques; dejarle elegir entre
-    // tempos sin relación de octava convertía 132 en 105.)
-    const double top = a.candidates.front().bpm;
-    // Con 3:2 y 2:3: las corcheas de un 174 hacen que la autocorrelación prefiera 116.
-    add(top), add(2 * top), add(top / 2), add(top * 1.5), add(top / 1.5);
-    double best_score = -1, best_bpm = a.candidates.front().bpm;
-    for (double b : levels) {
-        const BeatGrid g = fit_grid(a.env, b);
-        const double oct = std::log2(g.bpm / opt.prior_center_bpm) / opt.prior_sigma_oct;
-        const double sc = pulse_strength(a.env, g) * std::exp(-0.5 * oct * oct);
-        if (sc > best_score) best_score = sc, best_bpm = g.bpm;
+    // Nivel métrico: la autocorrelación premia los tempos lentos (en música en bucle todo se
+    // repite cada compás), así que decide el pulso bajo cada tiempo, con un prior de nivel.
+    double best_score = -1e300, best_bpm = a.candidates.front().bpm;
+    for (const auto& c : level_candidates(a.env, a.candidates, opt)) {
+        const double oct = std::log2(c.bpm / opt.prior_center_bpm) / opt.prior_sigma_oct;
+        const double sc = c.f[0] - 0.5 * oct * oct;  // log(pulso · prior)
+        if (sc > best_score) best_score = sc, best_bpm = c.bpm;
     }
     a.grid = refine_grid(a.env, best_bpm);
     return a;

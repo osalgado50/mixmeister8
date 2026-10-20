@@ -185,6 +185,47 @@ int cmd_phasediag(const char* audio, const char* mxm) {
     return 0;
 }
 
+
+/// Diagnóstico de compás: posición (0-3) de la entrada de MixMeister en nuestra rejilla y,
+/// por posición, los rasgos de compás. Solo pistas al mismo nivel y en fase (< 0,1 tiempos).
+int cmd_bardiag(const char* audio, const char* mxm) {
+    const Buffer b = read_audio(audio);
+    const auto mono = to_mono(b);
+    const RhythmAnalysis a = analyze_rhythm(mono, b.sample_rate);
+    const Mxm m = read_mxm(mxm);
+    if (!m.prof || m.prof->arrays.empty() || m.prof->arrays[0].empty()) return 1;
+    const auto& g = a.grid;
+    if (std::abs(g.bpm / m.prof->bpm - 1) > 0.02) return 1;
+    const auto [off, k] = beat_offset(g, m.prof->seconds(m.prof->arrays[0][0]));
+    if (std::abs(off) >= 0.1) return 1;
+    const auto f = bar_features(a.env, g.first_beat_s, g.period(), g.first_sounding_beat);
+    std::printf("%s\t%ld", base(audio).c_str(), ((k % 4) + 4) % 4);
+    for (int j = 0; j < 4; ++j)
+        for (double v : f[j]) std::printf("\t%.5f", v);
+    std::puts("");
+    return 0;
+}
+
+
+/// Diagnóstico de nivel: candidatos de la familia del mejor tempo, cuál coincide con el BPM de
+/// MixMeister (±2 %) y sus rasgos. Línea: nombre, bpm_mm, n, y n × (bpm, etiqueta, rasgos).
+int cmd_leveldiag(const char* audio, const char* mxm) {
+    const Buffer b = read_audio(audio);
+    const auto mono = to_mono(b);
+    const auto env = onset_envelope(mono, b.sample_rate);
+    const auto cands = tempo_candidates(env);
+    const Mxm m = read_mxm(mxm);
+    if (!m.prof || cands.empty()) return 1;
+    const auto lv = level_candidates(env, cands);
+    std::printf("%s\t%.4f\t%zu", base(audio).c_str(), m.prof->bpm, lv.size());
+    for (const auto& c : lv) {
+        std::printf("\t%.4f\t%d", c.bpm, std::abs(c.bpm / m.prof->bpm - 1) < 0.02 ? 1 : 0);
+        for (double v : c.f) std::printf("\t%.5f", v);
+    }
+    std::puts("");
+    return 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -196,6 +237,8 @@ int main(int argc, char** argv) {
         if (c == "compare" && argc == 4) return cmd_compare(argv[2], argv[3], false);
         if (c == "tsv" && argc == 4) return cmd_compare(argv[2], argv[3], true);
         if (c == "phasediag" && argc == 4) return cmd_phasediag(argv[2], argv[3]);
+        if (c == "bardiag" && argc == 4) return cmd_bardiag(argv[2], argv[3]);
+        if (c == "leveldiag" && argc == 4) return cmd_leveldiag(argv[2], argv[3]);
         return usage();
     } catch (const std::exception& e) {
         std::fprintf(stderr, "error: %s\n", e.what());

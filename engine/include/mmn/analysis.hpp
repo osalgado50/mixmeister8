@@ -44,7 +44,7 @@ std::vector<TempoCandidate> tempo_candidates(const OnsetEnvelope& env, const Tem
 struct BeatGrid {
     double bpm = 0;
     double first_beat_s = 0;   ///< primer tiempo >= 0
-    int downbeat = 0;          ///< índice (0-3) del tiempo que abre compás: el primero que suena
+    int downbeat = 0;          ///< índice (0-3) del tiempo que abre compás, por el sonido (regla aprendida)
     long first_sounding_beat = 0;  ///< índice del primer tiempo con sonido (el compás 1)
     double confidence = 0;     ///< pico frente a fondo, 0 = sin pulso
     [[nodiscard]] double period() const { return 60.0 / bpm; }
@@ -58,6 +58,27 @@ std::array<double, 8> phase_features(const OnsetEnvelope& env, double t0, double
 
 /// Puntuación tiempo-frente-a-contratiempo: positiva si la rejilla en t0 está en el tiempo.
 double phase_score(const OnsetEnvelope& env, double t0, double period);
+
+/// Rasgos de compás: para cada posición j = 0..3 (tiempo k con k % 4 == j en la rejilla),
+/// medias centradas entre posiciones de: [0-3] ataque en subgraves, graves, medios, agudos;
+/// [4] cambio armónico (90 Hz-2 kHz, parte sostenida del tiempo, solo lo que aparece);
+/// [5] novedad de compás (espectro de los 4 tiempos siguientes frente a los 4 anteriores);
+/// [6] salto de nivel entre esos dos compases; [7] 1 si j es el primer tiempo que suena.
+constexpr std::size_t kBarFeatures = 8;
+std::array<std::array<double, kBarFeatures>, 4> bar_features(const OnsetEnvelope& env, double first_beat_s,
+                                                             double period, long first_sounding_beat);
+
+/// Candidato de nivel métrico (familia T, 2T, T/2, 3T/2, 2T/3 del mejor tempo) con sus rasgos:
+/// [0] log de la fuerza del pulso bajo cada tiempo; [1] fuerza en el medio tiempo frente a la
+/// del tiempo; [2] log de la coherencia de la rejilla frente a la del mejor candidato;
+/// [3] x = log2(bpm/120); [4] x²; [5] log del pulso de graves.
+constexpr std::size_t kLevelFeatures = 6;
+struct LevelCandidate {
+    double bpm = 0;
+    std::array<double, kLevelFeatures> f{};
+};
+std::vector<LevelCandidate> level_candidates(const OnsetEnvelope& env, const std::vector<TempoCandidate>& cands,
+                                             const TempoOptions& opt = {});
 
 /// Afina periodo y fase alrededor de `bpm0` por coherencia de fase en toda la pista.
 BeatGrid refine_grid(const OnsetEnvelope& env, double bpm0);
