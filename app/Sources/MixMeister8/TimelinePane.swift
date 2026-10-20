@@ -7,6 +7,7 @@ final class TimelinePane: NSView {
     private let scroll = NSScrollView()
     private let status = label("CURRENT 00:00:00   REMAINING 00:00:00   TOTAL 00:00:00", size: 10.5, weight: .semibold, color: Theme.background)
     private let bpmField = NSTextField()
+    private let bpmStepper = NSStepper()
     private let zoom = NSSlider(value: 0.35, minValue: 0, maxValue: 1, target: nil, action: nil)
     private let snap = NSButton()
     private let strips = NSPopUpButton()
@@ -46,13 +47,21 @@ final class TimelinePane: NSView {
         bpmField.drawsBackground = true
         bpmField.backgroundColor = Theme.panelRaised
         bpmField.textColor = Theme.text
-        bpmField.isEditable = false
-        bpmField.toolTip = "Master BPM"
+        bpmField.isEditable = true
+        bpmField.focusRingType = .none
+        bpmField.target = self
+        bpmField.action = #selector(bpmTyped)
+        bpmField.toolTip = "Master BPM: escribe un tempo o usa las flechas (añade un marcador de tempo en el cursor)"
+        bpmStepper.minValue = 20; bpmStepper.maxValue = 300; bpmStepper.increment = 0.1
+        bpmStepper.valueWraps = false
+        bpmStepper.controlSize = .small
+        bpmStepper.target = self
+        bpmStepper.action = #selector(bpmStepped)
         zoom.controlSize = .small
         zoom.target = self
         zoom.action = #selector(zoomed)
         let bpmLabel = label("BPM", size: 9.5, weight: .semibold, color: Theme.textDim)
-        let stack = NSStackView(views: [snap, strips, pill, NSView(), bpmLabel, bpmField, label("ZOOM", size: 9.5, weight: .semibold, color: Theme.textDim), zoom])
+        let stack = NSStackView(views: [snap, strips, pill, NSView(), bpmLabel, bpmField, bpmStepper, label("ZOOM", size: 9.5, weight: .semibold, color: Theme.textDim), zoom])
         stack.spacing = 10
         stack.edgeInsets = NSEdgeInsets(top: 0, left: 10, bottom: 0, right: 10)
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -100,9 +109,26 @@ final class TimelinePane: NSView {
     @objc func update() {
         let s = Session.shared
         strips.selectItem(at: [2, 4, 6, 8].firstIndex(of: s.strips) ?? 1)
-        bpmField.stringValue = s.layout.masterBPM > 0 ? String(format: "%.2f", s.layout.masterBPM) : "—"
+        showTempo()
         stripControls.strips = s.strips
         updateStatus()
+    }
+
+    /// Master BPM: el tempo de la mezcla en el cursor.
+    func showTempo() {
+        let L = Session.shared.layout
+        guard L.masterBPM > 0, window?.firstResponder !== bpmField.currentEditor() else { if L.masterBPM <= 0 { bpmField.stringValue = "—" }; return }
+        let t = L.tempo(at: timeline.playhead)
+        bpmField.stringValue = String(format: "%.2f", t)
+        bpmStepper.doubleValue = t
+    }
+    @objc private func bpmStepped() { setTempo(bpmStepper.doubleValue) }
+    @objc private func bpmTyped() {
+        if let v = Double(bpmField.stringValue.replacingOccurrences(of: ",", with: ".")), v >= 20, v <= 300 { setTempo(v) }
+        window?.makeFirstResponder(timeline)
+    }
+    private func setTempo(_ v: Double) {
+        (NSApp.delegate as? AppDelegate)?.setMasterTempo((v * 100).rounded() / 100, at: timeline.playhead)
     }
 
     func updateStatus() {
@@ -120,6 +146,7 @@ final class TimelinePane: NSView {
         timeline.playhead = p.position
         meters.left = p.peakL; meters.right = p.peakR; meters.needsDisplay = true
         updateStatus()
+        showTempo()
         if p.isPlaying {
             let x = timeline.x(p.position)
             let vis = scroll.contentView.bounds
@@ -151,7 +178,7 @@ final class StripControls: FillView {
     required init?(coder: NSCoder) { fatalError() }
     override func draw(_ r: NSRect) {
         super.draw(r)
-        let h = (bounds.height - TimelineView.rulerHeight - 14) / CGFloat(strips)
+        let h = (bounds.height - TimelineView.rulerHeight - TimelineView.tempoLaneHeight - 14) / CGFloat(strips)
         let a: [NSAttributedString.Key: Any] = [.font: Theme.font(9, .semibold), .foregroundColor: Theme.textDim]
         for k in 0..<strips {
             let y = TimelineView.rulerHeight + CGFloat(k) * h

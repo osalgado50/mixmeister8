@@ -7,27 +7,24 @@ extension Notification.Name {
     static let playerState = Notification.Name("mm8.playerState")
 }
 
-/// Reproducción de la mezcla en tiempo real.
-///
-/// Cada pista es una cadena reproductor → cambio de tempo sin cambio de tono → ecualizador de 3
-/// bandas → mezclador. Los segmentos se programan en el instante de la mezcla que les da
-/// MixLayout; la envolvente de volumen (marcadores automáticos y manuales) y los marcadores de
-/// graves/medios/agudos se aplican 60 veces por segundo según la posición de cada pista.
 /// Registro de diagnóstico: ~/Library/Logs/MixMeister 8.log
 enum Log {
     static let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/MixMeister 8.log")
+    private static let q = DispatchQueue(label: "mm8.log")
     static func write(_ s: String) {
         let line = "\(Date()) \(s)\n"
-        if let h = try? FileHandle(forWritingTo: url) { h.seekToEndOfFile(); h.write(Data(line.utf8)); try? h.close() }
-        else { try? line.write(to: url, atomically: true, encoding: .utf8) }
+        q.async {
+            if let h = try? FileHandle(forWritingTo: url) { h.seekToEndOfFile(); h.write(Data(line.utf8)); try? h.close() }
+            else { try? line.write(to: url, atomically: true, encoding: .utf8) }
+        }
     }
 }
 
-final class Player {
-    static let shared = Player()
-
-    private let engine = AVAudioEngine()
-    private struct Chain {
+/// La mezcla como grafo de audio: por pista, reproductor → cambio de tempo sin cambio de tono →
+/// ecualizador de 3 bandas → mezclador. Lo usan igual la reproducción en directo y la exportación
+/// (fichero o CD), así que lo que se exporta es exactamente lo que se oye.
+final class MixGraph {
+    struct Chain {
         let index: Int
         let player = AVAudioPlayerNode()
         let pitch = AVAudioUnitTimePitch()
@@ -37,23 +34,149 @@ final class Player {
         let volume: [(t: Double, db: Double)]      // por posición en el audio (s)
         let bass: [(t: Double, db: Double)], mid: [(t: Double, db: Double)], treble: [(t: Double, db: Double)]
     }
-    private var chains: [Chain] = []
+    let engine: AVAudioEngine
+    private(set) var chains: [Chain] = []
+    /// Limitador del master (Apple Peak Limiter, −1 dB): evita que los solapes saturen.
+    private let limiter = AVAudioUnitEffect(audioComponentDescription: AudioComponentDescription(
+        componentType: kAudioUnitType_Effect, componentSubType: kAudioUnitSubType_PeakLimiter,
+        componentManufacturer: kAudioUnitManufacturer_Apple, componentFlags: 0, componentFlagsMask: 0))
+    let layout: MixLayout
+    let doc: PLDocument
+
+    init(engine: AVAudioEngine, layout: MixLayout, doc: PLDocument) {
+        self.engine = engine; self.layout = layout; self.doc = doc
+    }
+
+    /// Crea las cadenas de las pistas que aún suenan después de `from`. Devuelve cuántas.
+    @discardableResult
+    func build(from: Double, audioPath: (Int) -> String?) -> Int {
+        for item in layout.items where item.mixEnd > from && !item.segments.isEmpty {
+            guard item.index < doc.tracks.count, let path = audioPath(item.index),
+                  let file = try? AVAudioFile(forReading: URL(fileURLWithPath: path)) else { continue }
+            let t = doc.tracks[item.index]
+            func env(_ kinds: [UInt32]) -> [(t: Double, db: Double)] {
+                t.markers.filter { kinds.contains($0.type) }.map { (Double($0.pos_us) * 1e-6, $0.value) }.sorted { $0.t < $1.t }
+            }
+            let c = Chain(index: item.index, file: file, item: item,
+                          volume: env([MarkerKind.volume, MarkerKind.autoVolume, MarkerKind.autoVolumeIn]),
+                          bass: env([MarkerKind.bass]), mid: env([MarkerKind.mid]), treble: env([MarkerKind.treble]))
+            engine.attach(c.player); engine.attach(c.pitch); engine.attach(c.eq)
+            let fmt = file.processingFormat
+            engine.connect(c.player, to: c.pitch, format: fmt)
+            engine.connect(c.pitch, to: c.eq, format: fmt)
+            engine.connect(c.eq, to: engine.mainMixerNode, format: fmt)
+            c.pitch.pitch = Float(t.key_semitones * 100)      // Track Settings › Key Adjustment (cents)
+            c.pitch.overlap = 8
+            let b = c.eq.bands
+            b[0].filterType = .lowShelf; b[0].frequency = 120; b[0].bypass = false
+            b[1].filterType = .parametric; b[1].frequency = 1000; b[1].bandwidth = 1.5; b[1].bypass = false
+            b[2].filterType = .highShelf; b[2].frequency = 6000; b[2].bypass = false
+            for k in 0..<3 { b[k].gain = 0 }
+            chains.append(c)
+        }
+        engine.mainMixerNode.outputVolume = Float(pow(10, doc.master_gain_db / 20))
+        // mezclador → limitador → salida
+        let fmt = engine.mainMixerNode.outputFormat(forBus: 0)
+        engine.attach(limiter)
+        engine.disconnectNodeOutput(engine.mainMixerNode)
+        engine.connect(engine.mainMixerNode, to: limiter, format: fmt)
+        engine.connect(limiter, to: engine.outputNode, format: fmt)
+        AudioUnitSetParameter(limiter.audioUnit, kLimiterParam_PreGain, kAudioUnitScope_Global, 0, -1.0, 0)
+        return chains.count
+    }
+
+    /// Programa los segmentos. El tiempo de cada reproductor cuenta segundos de audio consumido:
+    /// antes de que entre la pista, corre a la velocidad de su entrada (se mantiene fija hasta
+    /// entonces); después, los segmentos van seguidos.
+    func schedule(from: Double) {
+        for c in chains {
+            let sr = c.file.processingFormat.sampleRate
+            let item = c.item
+            let segs = item.segments.sorted { $0.mixStart < $1.mixStart }
+            guard let first = segs.first else { continue }
+            let started = from >= item.mixStart
+            let accNow = started ? item.toSource(from) : first.acc
+            let idle = started ? 0 : (item.mixStart - from) * item.rate(at: item.mixStart)
+            c.pitch.rate = Float(max(1.0 / 32, min(32, item.rate(at: max(from, item.mixStart)))))
+            for seg in segs where seg.mixEnd > from {
+                var startSrc = seg.srcStart
+                var playerTime = idle + (seg.acc - accNow)
+                if started, from > seg.mixStart {           // el segmento ya va por la mitad
+                    startSrc = seg.srcStart + (accNow - seg.acc)
+                    playerTime = 0
+                }
+                let a = AVAudioFramePosition(max(0, startSrc) * sr)
+                let e = min(c.file.length, AVAudioFramePosition(seg.srcEnd * sr))
+                guard e > a else { continue }
+                let when = AVAudioTime(sampleTime: AVAudioFramePosition(max(0, playerTime) * sr), atRate: sr)
+                c.player.scheduleSegment(c.file, startingFrame: a, frameCount: AVAudioFrameCount(e - a), at: when)
+            }
+        }
+    }
+
+    func start(at time: AVAudioTime?) { for c in chains { c.player.play(at: time) } }
+
+    func teardown() {
+        for c in chains {
+            c.player.stop()
+            engine.disconnectNodeOutput(c.player); engine.disconnectNodeOutput(c.pitch); engine.disconnectNodeOutput(c.eq)
+            engine.detach(c.player); engine.detach(c.pitch); engine.detach(c.eq)
+        }
+        chains.removeAll()
+        if limiter.engine != nil {
+            let fmt = engine.mainMixerNode.outputFormat(forBus: 0)
+            engine.disconnectNodeOutput(limiter)
+            engine.disconnectNodeOutput(engine.mainMixerNode)
+            engine.detach(limiter)
+            engine.connect(engine.mainMixerNode, to: engine.outputNode, format: fmt)
+        }
+    }
+
+    private static func value(_ env: [(t: Double, db: Double)], at t: Double) -> Double? {
+        guard let first = env.first else { return nil }
+        if t <= first.t { return first.db }
+        for i in 1..<env.count where t < env[i].t {
+            let a = env[i - 1], b = env[i]
+            return a.db + (b.db - a.db) * (t - a.t) / max(1e-9, b.t - a.t)
+        }
+        return env.last!.db
+    }
+
+    /// Volumen, ecualización y tempo en el instante `mix` de la mezcla.
+    func update(at mix: Double) {
+        for c in chains {
+            let item = c.item
+            let seg = item.segments.first { mix >= $0.mixStart && mix < $0.mixEnd } ?? item.segments[0]
+            let src = seg.source(item, at: mix)
+            let db = Self.value(c.volume, at: src) ?? 0
+            c.player.volume = db <= -49.5 ? 0 : Float(pow(10, db / 20))
+            c.eq.bands[0].gain = Float(max(-60, min(24, Self.value(c.bass, at: src) ?? 0)))
+            c.eq.bands[1].gain = Float(max(-60, min(24, Self.value(c.mid, at: src) ?? 0)))
+            c.eq.bands[2].gain = Float(max(-60, min(24, Self.value(c.treble, at: src) ?? 0)))
+            if mix >= item.mixStart { c.pitch.rate = Float(max(1.0 / 32, min(32, item.rate(at: mix)))) }
+        }
+    }
+}
+
+/// Reproducción en directo.
+final class Player {
+    static let shared = Player()
+
+    private let engine = AVAudioEngine()
+    private var graph: MixGraph?
     private var startHost: UInt64 = 0
     private var startMix: Double = 0
     private var timer: Timer?
     private(set) var isPlaying = false
     private var pausedAt: Double = 0
     var peakL: Float = 0, peakR: Float = 0
-
-    // Preescucha de la biblioteca (Preview Song / Stop Previewing)
     private var preview: AVAudioPlayer?
 
     /// Posición actual en la mezcla (s).
     var position: Double {
         guard isPlaying else { return pausedAt }
         let now = mach_absolute_time()
-        // El sonido arranca unos ms en el futuro (startHost): hasta entonces, la posición es la de salida.
-        guard now > startHost else { return startMix }
+        guard now > startHost else { return startMix }      // arranca unos ms en el futuro
         return startMix + Double(now - startHost) * Self.ticksToSeconds
     }
     private static let ticksToSeconds: Double = {
@@ -64,7 +187,6 @@ final class Player {
 
     init() {
         let mixer = engine.mainMixerNode
-        defer { applyOutputDevice() }
         mixer.installTap(onBus: 0, bufferSize: 1024, format: mixer.outputFormat(forBus: 0)) { [weak self] buf, _ in
             guard let self, let ch = buf.floatChannelData else { return }
             let n = Int(buf.frameLength)
@@ -74,11 +196,11 @@ final class Player {
             self.peakL = max(l, self.peakL * 0.85)
             self.peakR = max(r, self.peakR * 0.85)
         }
+        setDevice()
     }
 
-    // MARK: Salida
+    // MARK: Salida (Tools › Audio Output Configuration)
 
-    /// Envía el audio a la salida elegida en Audio Output Configuration (o la del sistema).
     func applyOutputDevice() {
         let wasPlaying = isPlaying, at = position
         if wasPlaying { stopNodes() }
@@ -86,7 +208,6 @@ final class Player {
         setDevice()
         if wasPlaying { play(from: at) }
     }
-
     private func setDevice() {
         guard let dev = OutputConfig.main(), let au = engine.outputNode.audioUnit else { return }
         var id = dev.id
@@ -101,65 +222,26 @@ final class Player {
     func play(from t: Double) {
         stopNodes()
         let s = Session.shared
-        let L = s.layout
-        let from = max(0, min(t, max(0, L.total - 0.05)))
-        engine.mainMixerNode.outputVolume = Float(pow(10, s.doc.master_gain_db / 20))
-        // Cadenas solo para las pistas que aún tienen algo que sonar.
-        for item in L.items where item.mixEnd > from {
-            guard item.index < s.doc.tracks.count, let path = s.audioPath(item.index),
-                  let file = try? AVAudioFile(forReading: URL(fileURLWithPath: path)) else { continue }
-            let t = s.doc.tracks[item.index]
-            func env(_ kinds: [UInt32]) -> [(t: Double, db: Double)] {
-                t.markers.filter { kinds.contains($0.type) }.map { (Double($0.pos_us) * 1e-6, $0.value) }.sorted { $0.t < $1.t }
-            }
-            let c = Chain(index: item.index, file: file, item: item,
-                          volume: env([MarkerKind.volume, MarkerKind.autoVolume, MarkerKind.autoVolumeIn]),
-                          bass: env([MarkerKind.bass]), mid: env([MarkerKind.mid]), treble: env([MarkerKind.treble]))
-            engine.attach(c.player); engine.attach(c.pitch); engine.attach(c.eq)
-            let fmt = file.processingFormat
-            engine.connect(c.player, to: c.pitch, format: fmt)
-            engine.connect(c.pitch, to: c.eq, format: fmt)
-            engine.connect(c.eq, to: engine.mainMixerNode, format: fmt)
-            c.pitch.rate = Float(max(1.0 / 32, min(32, item.rate)))
-            c.pitch.pitch = Float(t.key_semitones * 100)   // Key Adjustment, en cents
-            let b = c.eq.bands
-            b[0].filterType = .lowShelf; b[0].frequency = 120; b[0].bypass = false
-            b[1].filterType = .parametric; b[1].frequency = 1000; b[1].bandwidth = 1.5; b[1].bypass = false
-            b[2].filterType = .highShelf; b[2].frequency = 6000; b[2].bypass = false
-            for k in 0..<3 { b[k].gain = 0 }
-            chains.append(c)
-        }
-        Log.write("play desde \(String(format: "%.2f", from)) s: \(chains.count) pistas con audio de \(L.items.count); motor en marcha=\(engine.isRunning)")
-        guard !chains.isEmpty else { pausedAt = from; return }
+        let from = max(0, min(t, max(0, s.layout.total - 0.05)))
+        let g = MixGraph(engine: engine, layout: s.layout, doc: s.doc)
+        let n = g.build(from: from) { s.audioPath($0) }
+        Log.write("play desde \(String(format: "%.2f", from)) s: \(n) pistas con audio de \(s.layout.items.count)")
+        guard n > 0 else { pausedAt = from; return }
         setDevice()
         engine.prepare()
-        do { try engine.start() } catch { Log.write("ERROR al arrancar el audio: \(error)"); stopNodes(); return }
-
-        // Programación: el tiempo del reproductor corre a `rate` veces el tiempo real.
-        for c in chains {
-            let sr = c.file.processingFormat.sampleRate
-            for seg in c.item.segments where seg.mixEnd > from {
-                let wallStart = max(0, seg.mixStart - from)                 // s desde ahora
-                let srcFrom = seg.srcStart + max(0, from - seg.mixStart) * c.item.rate
-                let startFrame = AVAudioFramePosition(max(0, srcFrom) * sr)
-                let endFrame = min(c.file.length, AVAudioFramePosition(seg.srcEnd * sr))
-                guard endFrame > startFrame else { continue }
-                let when = AVAudioTime(sampleTime: AVAudioFramePosition(wallStart * c.item.rate * sr), atRate: sr)
-                c.player.scheduleSegment(c.file, startingFrame: startFrame, frameCount: AVAudioFrameCount(endFrame - startFrame), at: when)
-            }
-        }
-        let lead = 0.08
-        let host = mach_absolute_time() + UInt64(lead / Self.ticksToSeconds)
-        let at = AVAudioTime(hostTime: host)
-        applyEnvelopes(at: from)
-        for c in chains { c.player.play(at: at) }
-        Log.write("sonando: \(chains.map { "\($0.index + 1)" }.joined(separator: ",")) · salida \(outputName)")
+        do { try engine.start() } catch { Log.write("ERROR al arrancar el audio: \(error)"); g.teardown(); return }
+        g.schedule(from: from)
+        g.update(at: from)
+        let host = mach_absolute_time() + UInt64(0.08 / Self.ticksToSeconds)
+        g.start(at: AVAudioTime(hostTime: host))
+        graph = g
         startHost = host
         startMix = from
         isPlaying = true
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60, repeats: true) { [weak self] _ in self?.tick() }
         RunLoop.main.add(timer!, forMode: .common)
+        Log.write("sonando · salida \(outputName)")
         NotificationCenter.default.post(name: .playerState, object: nil)
     }
 
@@ -179,21 +261,15 @@ final class Player {
         NotificationCenter.default.post(name: .playerTick, object: nil)
     }
 
-    /// Mover el cursor: si está sonando, sigue sonando desde ahí.
     func seek(_ t: Double) {
         if isPlaying { play(from: t) } else { pausedAt = max(0, t); NotificationCenter.default.post(name: .playerTick, object: nil) }
     }
 
     private func stopNodes() {
         timer?.invalidate(); timer = nil
-        for c in chains {
-            c.player.stop()
-            engine.disconnectNodeOutput(c.player); engine.disconnectNodeOutput(c.pitch); engine.disconnectNodeOutput(c.eq)
-            engine.detach(c.player); engine.detach(c.pitch); engine.detach(c.eq)
-        }
-        chains.removeAll()
-        // El motor se para siempre: con el motor en marcha, los reproductores recién conectados
-        // no arrancan (la segunda reproducción quedaba muda). En play() se vuelve a arrancar.
+        graph?.teardown(); graph = nil
+        // El motor se para siempre: con el motor en marcha, los reproductores recién conectados no
+        // arrancan. En play() se vuelve a arrancar.
         engine.stop()
         engine.reset()
         isPlaying = false
@@ -203,35 +279,11 @@ final class Player {
     private func tick() {
         let p = position
         if p >= Session.shared.layout.total + 0.5 { Log.write("fin de la mezcla"); stop(); return }
-        applyEnvelopes(at: p)
+        graph?.update(at: p)
         NotificationCenter.default.post(name: .playerTick, object: nil)
     }
 
-    // MARK: Envolventes
-
-    private static func value(_ env: [(t: Double, db: Double)], at t: Double) -> Double? {
-        guard let first = env.first else { return nil }
-        if t <= first.t { return first.db }
-        for i in 1..<env.count where t < env[i].t {
-            let a = env[i - 1], b = env[i]
-            let u = (t - a.t) / max(1e-9, b.t - a.t)
-            return a.db + (b.db - a.db) * u
-        }
-        return env.last!.db
-    }
-
-    private func applyEnvelopes(at mix: Double) {
-        for c in chains {
-            let src = c.item.toSource(mix)
-            let db = Self.value(c.volume, at: src) ?? 0
-            c.player.volume = db <= -49.5 ? 0 : Float(pow(10, db / 20))
-            c.eq.bands[0].gain = Float(max(-60, min(24, Self.value(c.bass, at: src) ?? 0)))
-            c.eq.bands[1].gain = Float(max(-60, min(24, Self.value(c.mid, at: src) ?? 0)))
-            c.eq.bands[2].gain = Float(max(-60, min(24, Self.value(c.treble, at: src) ?? 0)))
-        }
-    }
-
-    // MARK: Preescucha
+    // MARK: Preescucha de la biblioteca
 
     func previewPlay(path: String) {
         preview?.stop()

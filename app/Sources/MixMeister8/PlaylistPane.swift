@@ -31,7 +31,11 @@ final class PlaylistPane: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
             ToolButton(symbol: "forward.end.fill", tip: "Next Track", action: NSSelectorFromString("nextTrack:")),
             ToolButton(symbol: "arrow.triangle.merge", tip: "Mix Now (F6)", action: NSSelectorFromString("mixNow:")),
         ]
-        let stack = NSStackView(views: buttons + [NSView()])
+        // Arriba a la derecha, como en el original: «Export playlist to a file or iTunes» y «Burn
+        // Playlist onto an Audio CD».
+        let export = ToolButton(symbol: "square.and.arrow.up", tip: "Export playlist to a file or iTunes", action: NSSelectorFromString("exportChooser:"))
+        let burn = ToolButton(symbol: "opticaldisc", tip: "Burn Playlist onto an Audio CD", action: NSSelectorFromString("burnCD:"))
+        let stack = NSStackView(views: buttons + [NSView(), export, burn])
         stack.spacing = 4
         stack.edgeInsets = NSEdgeInsets(top: 0, left: 8, bottom: 0, right: 8)
         stack.translatesAutoresizingMaskIntoConstraints = false

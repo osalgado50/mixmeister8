@@ -48,6 +48,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                 }
             }
         }
+        // Prueba de exportación: MixMeister8 lista.mmp --exporttest salida.wav [songs|labels]
+        if let i = args.firstIndex(of: "--exporttest"), i + 1 < args.count {
+            let out = URL(fileURLWithPath: args[i + 1])
+            let split: Exporter.Split = args.contains("--songs") ? .songs : (args.contains("--labels") ? .labels : .none)
+            DispatchQueue.global().asyncAfter(deadline: .now() + 1.5) {
+                let t0 = Date()
+                do {
+                    let urls = try Exporter.toFiles(base: out, kind: .wav, split: split) { _ in true }
+                    print("EXPORTTEST ok \(urls.count) ficheros en \(String(format: "%.1f", Date().timeIntervalSince(t0))) s: \(urls.map(\.lastPathComponent).joined(separator: ", "))")
+                } catch { print("EXPORTTEST error \(error.localizedDescription)") }
+                if args.contains("--cd") {
+                    do { let c = try Exporter.cdImage(dir: out.deletingLastPathComponent(), split: .songs) { _ in true }; print("CDTEST ok \(c.path)") }
+                    catch { print("CDTEST error \(error.localizedDescription)") }
+                }
+                fflush(stdout)
+                DispatchQueue.main.async { NSApp.terminate(nil) }
+            }
+        }
+        // Diagnóstico del tempo por fila: MixMeister8 lista.mmp --dumpbpm
+        if args.contains("--dumpbpm") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                let L = self.session.layout
+                for it in L.items where !it.overlay {
+                    var sum = 0.0, n = 0
+                    var t = it.mixStart
+                    while t < it.mixEnd { sum += it.tempo(at: t); n += 1; t += 0.25 }
+                    let mid = it.tempo(at: (it.mixStart + it.mixEnd) / 2)
+                    print(String(format: "BPM %2d entrada=%.1f inicio=%.1f medio=%.1f mitad=%.1f fin=%.1f", it.index + 1, it.tempo, it.tempo(at: it.mixStart), sum / Double(max(1, n)), mid, it.tempo(at: it.mixEnd - 0.1)))
+                }
+                fflush(stdout)
+                NSApp.terminate(nil)
+            }
+        }
         if let i = args.firstIndex(of: "--snapshot"), i + 1 < args.count {
             if let j = args.firstIndex(of: "--select"), j + 1 < args.count, let n = Int(args[j + 1]) { session.selectedTrack = n }
             if let j = args.firstIndex(of: "--zoom"), j + 1 < args.count, let z = Double(args[j + 1]) { timelinePane.zoom(by: z) }
@@ -203,6 +236,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         case "savePlayList:", "savePlayListAs:": return !session.doc.tracks.isEmpty || session.path != nil
         case "delete:", "del:", "tweaks:", "adjustTrackSettings:", "editTag:":
             return session.selectedTrack != nil && (sel == "delete:" || sel == "del:")
+        case "editRulerMarkerItem:", "deleteRulerMarkerItem:": return lane.point != nil
+        case "burnCD:", "exportPlaylistToFile:", "exportPlaylistToDevice:", "exportPlaylistAsMobileMix:", "exportChooser:":
+            return !session.doc.tracks.isEmpty
         case "addToEndOfPlaylist:", "catPreviewPlay:": return !library.selectedItems.isEmpty
         case "catPreviewStop:": return player.isPreviewing
         case "playPause:", "jogForward:", "jogBackward:", "previousTrack:", "nextTrack:", "mixNow:":
@@ -380,6 +416,94 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
 
     @objc func doAudioSetupDialog(_ s: Any?) { OutputConfig.runDialog() }
+
+    // MARK: Exportar y CD (botones de arriba a la derecha de la lista y menú File)
+
+    @objc func exportChooser(_ s: Any?) { ExportUI.shared.chooseFileOrDevice() }
+    @objc func exportPlaylistToFile(_ s: Any?) { ExportUI.shared.exportToFile() }
+    @objc func exportPlaylistToDevice(_ s: Any?) { ExportUI.shared.exportToMusic() }
+    @objc func exportPlaylistAsMobileMix(_ s: Any?) { ExportUI.shared.exportToMusic() }
+    @objc func burnCD(_ s: Any?) { ExportUI.shared.burnCD() }
+
+    // MARK: Tempo (barra de tempos y Master BPM)
+
+    private var lane: (time: Double, point: (track: Int, type: UInt32, mix: Double)?) { timelinePane.timeline.laneClick }
+
+    /// Añade un marcador de tempo (o de tempo original) en el instante `t` de la mezcla, en la
+    /// pista principal que suena ahí.
+    private func addTempoMarker(type: UInt32, at t: Double, value: Double?) {
+        let L = session.layout
+        guard let item = L.primary(at: t), item.index < session.doc.tracks.count else { return }
+        let v = value ?? (type == MarkerKind.originalTempo ? item.own : item.tempo(at: t))
+        let pos = Int64((item.toSource(t) * 1e6).rounded())
+        session.mutate(type == MarkerKind.tempo ? "Add Tempo Marker" : "Add Original Tempo Marker") { d in
+            d.tracks[item.index].layer.append(.marker(PLMarker(type: type, pos_us: pos, value: (v * 1000).rounded() / 1000)))
+        }
+    }
+    @objc func rulerAddTempoMarker(_ s: Any?) { addTempoMarker(type: MarkerKind.tempo, at: lane.time, value: nil) }
+    @objc func rulerAddOriginalTempoMarker(_ s: Any?) { addTempoMarker(type: MarkerKind.originalTempo, at: lane.time, value: nil) }
+
+    /// El marcador de la barra de tempos sobre el que se hizo clic: (pista, posición en la capa).
+    private func laneMarker() -> (track: Int, layer: Int, marker: PLMarker)? {
+        guard let p = lane.point, p.track < session.doc.tracks.count,
+              let item = session.layout.items.first(where: { $0.index == p.track }) else { return nil }
+        let t = session.doc.tracks[p.track]
+        var best: (Int, PLMarker, Double)?
+        for (k, li) in t.layer.enumerated() {
+            if case let .marker(m) = li, m.type == p.type {
+                let d = abs(item.toMix(Double(m.pos_us) * 1e-6) - p.mix)
+                if best == nil || d < best!.2 { best = (k, m, d) }
+            }
+        }
+        return best.map { (p.track, $0.0, $0.1) }
+    }
+
+    @objc func editRulerMarkerItem(_ s: Any?) {
+        guard let (ti, li, m) = laneMarker() else { return }
+        let a = NSAlert()
+        a.messageText = m.type == MarkerKind.originalTempo ? "Original Tempo Marker" : "Tempo Marker"
+        a.informativeText = "BPM:"
+        let f = NSTextField(frame: NSRect(x: 0, y: 0, width: 120, height: 24))
+        f.stringValue = String(format: "%.2f", m.value)
+        a.accessoryView = f
+        a.addButton(withTitle: "OK"); a.addButton(withTitle: "Cancel")
+        a.window.initialFirstResponder = f
+        guard a.runModal() == .alertFirstButtonReturn, let v = Double(f.stringValue.replacingOccurrences(of: ",", with: ".")), v >= 20, v <= 300 else { return }
+        session.mutate("Edit Tempo Marker") { d in
+            if case var .marker(mm) = d.tracks[ti].layer[li] { mm.value = v; d.tracks[ti].layer[li] = .marker(mm) }
+        }
+    }
+
+    @objc func deleteRulerMarkerItem(_ s: Any?) {
+        guard let (ti, li, _) = laneMarker() else { return }
+        session.mutate("Delete Tempo Marker") { d in d.tracks[ti].layer.remove(at: li) }
+    }
+
+    /// Master BPM (flechas o tecleado): cambia el tempo de la mezcla desde el cursor. Como en el
+    /// original, deja marcadores de tempo: si la pista aún no tenía, uno con el tempo de antes
+    /// justo detrás del cursor (lo ya sonado no cambia) y otro con el nuevo en el cursor; si ya hay
+    /// uno a menos de medio segundo, lo cambia.
+    func setMasterTempo(_ v: Double, at t: Double) {
+        let L = session.layout
+        guard let item = L.primary(at: t), item.index < session.doc.tracks.count else { return }
+        let tr = session.doc.tracks[item.index]
+        let src = item.toSource(t)
+        let old = item.tempo(at: t)
+        session.mutate("Change Master Tempo") { d in
+            var layer = d.tracks[item.index].layer
+            if let k = layer.firstIndex(where: { if case let .marker(m) = $0 { return m.type == MarkerKind.tempo && abs(Double(m.pos_us) * 1e-6 - src) < 0.5 }; return false }),
+               case var .marker(m) = layer[k] {
+                m.value = v; layer[k] = .marker(m)
+            } else {
+                if tr.markers(MarkerKind.tempo).isEmpty, src > 0.06 {
+                    layer.append(.marker(PLMarker(type: MarkerKind.tempo, pos_us: Int64(((src - 0.05) * 1e6).rounded()), value: (old * 1000).rounded() / 1000)))
+                }
+                layer.append(.marker(PLMarker(type: MarkerKind.tempo, pos_us: Int64((src * 1e6).rounded()), value: v)))
+            }
+            d.tracks[item.index].layer = layer
+        }
+        Log.write("Master BPM → \(v) en \(String(format: "%.2f", t)) s (pista \(item.index + 1))")
+    }
 
     // MARK: View
 

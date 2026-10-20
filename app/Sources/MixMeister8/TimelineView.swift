@@ -7,6 +7,9 @@ final class TimelineView: NSView {
     var rulerMeasures = true { didSet { needsDisplay = true } }
     var playhead: Double = 0 { didSet { needsDisplay = true } }
     static let rulerHeight: CGFloat = 20
+    static let tempoLaneHeight: CGFloat = 20   // barra de tempos (marcadores verdes), abajo
+    /// Último clic derecho en la barra de tempos: instante y, si cayó sobre uno, el marcador.
+    var laneClick: (time: Double, point: (track: Int, type: UInt32, mix: Double)?) = (0, nil)
     private var trackRects: [(index: Int, rect: NSRect)] = []
 
     override var isFlipped: Bool { true }
@@ -27,7 +30,8 @@ final class TimelineView: NSView {
         NSSize(width: max(800, CGFloat(Session.shared.layout.total + 30) * pps), height: NSView.noIntrinsicMetric)
     }
 
-    var stripHeight: CGFloat { (bounds.height - Self.rulerHeight) / CGFloat(Session.shared.strips) }
+    var stripHeight: CGFloat { (bounds.height - Self.rulerHeight - Self.tempoLaneHeight) / CGFloat(Session.shared.strips) }
+    var laneTop: CGFloat { bounds.height - Self.tempoLaneHeight }
     func x(_ t: Double) -> CGFloat { CGFloat(t) * pps }
     func time(_ x: CGFloat) -> Double { Double(x / pps) }
 
@@ -59,6 +63,8 @@ final class TimelineView: NSView {
             guard full.intersects(dirty) else { continue }
             drawTrack(t, item, full, selected: s.selectedTrack == item.index)
         }
+
+        drawTempoLane(L, dirty)
 
         // Cursor de reproducción
         let px = x(playhead)
@@ -133,8 +139,7 @@ final class TimelineView: NSView {
                 var px = r.minX
                 while px < r.maxX {
                     let tm = time(px)
-                    var src = item.toSource(tm)
-                    if seg.reversed { src = seg.srcEnd - (src - seg.srcStart) }
+                    let src = seg.source(item, at: tm)
                     let bin = Int(src / w.seconds * Double(w.peaks.count))
                     if bin >= 0, bin < w.peaks.count {
                         let a = CGFloat(w.peaks[bin]) * amp
@@ -210,6 +215,32 @@ final class TimelineView: NSView {
         NSGraphicsContext.restoreGraphicsState()
     }
 
+    /// Barra de tempos: cada marcador de tempo de la mezcla como un «⊥ 139.99» verde (los de tempo
+    /// original, más apagados), como la fila inferior de la línea de tiempo del original.
+    private func drawTempoLane(_ L: MixLayout, _ dirty: NSRect) {
+        let r = NSRect(x: dirty.minX, y: laneTop, width: dirty.width, height: Self.tempoLaneHeight)
+        Theme.header.setFill(); r.fill()
+        Theme.gridStrong.setFill(); NSRect(x: dirty.minX, y: laneTop, width: dirty.width, height: 1).fill()
+        var pts = L.tempoPoints
+        if pts.isEmpty, let f = L.items.first(where: { !$0.overlay }) { pts = [(f.mixStart, f.tempo, f.index, true)] }
+        for p in pts {
+            let px = x(p.mix)
+            guard px > dirty.minX - 60, px < dirty.maxX + 2 else { continue }
+            let c = p.original ? Theme.tempo.withAlphaComponent(0.55) : Theme.tempo
+            c.setFill()
+            NSRect(x: px - 0.5, y: laneTop + 3, width: 1.5, height: 13).fill()
+            NSRect(x: px - 4, y: laneTop + 15, width: 9, height: 1.5).fill()
+            (String(format: "%.2f", p.bpm) as NSString).draw(at: NSPoint(x: px + 4, y: laneTop + 3),
+                                                            withAttributes: [.font: Theme.mono(9.5, .semibold), .foregroundColor: c])
+        }
+    }
+
+    private func lanePoint(at px: CGFloat) -> (track: Int, type: UInt32, mix: Double)? {
+        let L = Session.shared.layout
+        return L.tempoPoints.min { abs(x($0.mix) - px) < abs(x($1.mix) - px) }
+            .flatMap { abs(x($0.mix) - px) <= 6 ? ($0.track, $0.original ? MarkerKind.originalTempo : MarkerKind.tempo, $0.mix) : nil }
+    }
+
     private func drawEnvelope(_ pts: [(Double, CGFloat)], color: NSColor, full: NSRect, baseline: CGFloat?) {
         guard !pts.isEmpty else { return }
         let p = NSBezierPath()
@@ -229,7 +260,10 @@ final class TimelineView: NSView {
     override func mouseDown(with e: NSEvent) {
         window?.makeFirstResponder(self)
         let p = convert(e.locationInWindow, from: nil)
-        if p.y >= Self.rulerHeight {
+        if p.y >= laneTop {
+            laneClick = (max(0, time(p.x)), lanePoint(at: p.x))
+            if e.clickCount == 2, laneClick.point != nil { NSApp.sendAction(NSSelectorFromString("editRulerMarkerItem:"), to: nil, from: self); return }
+        } else if p.y >= Self.rulerHeight {
             let hit = trackRects.last { $0.rect.contains(p) }
             Session.shared.selectedTrack = hit?.index
         }
@@ -239,7 +273,11 @@ final class TimelineView: NSView {
 
     override func menu(for event: NSEvent) -> NSMenu? {
         let p = convert(event.locationInWindow, from: nil)
-        if p.y < Self.rulerHeight { return MenuSpecs.timelineRuler.build() }
+        if p.y >= laneTop {
+            laneClick = (max(0, time(p.x)), lanePoint(at: p.x))
+            return laneClick.point == nil ? MenuSpecs.timelineRuler.build() : MenuSpecs.timelineRulerMarker.build()
+        }
+        if p.y < Self.rulerHeight { return nil }
         if let hit = trackRects.last(where: { $0.rect.contains(p) }) {
             Session.shared.selectedTrack = hit.index
             playhead = max(0, time(p.x))
