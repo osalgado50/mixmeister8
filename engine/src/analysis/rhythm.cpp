@@ -404,6 +404,9 @@ BeatGrid refine_grid(const OnsetEnvelope& e, double bpm0) {
         if (k == strength.size()) k = 0;
         g.downbeat = static_cast<int>(k % 4);
         g.first_sounding_beat = static_cast<long>(k);
+        std::size_t last = strength.size();
+        while (last > 0 && strength[last - 1] < 0.5 * med) --last;
+        g.last_sounding_beat = last > 0 ? static_cast<long>(last - 1) : static_cast<long>(strength.size()) - 1;
     }
 
     // 6) Compás por el sonido, con la convención como punto de partida. Regresión softmax
@@ -424,6 +427,17 @@ BeatGrid refine_grid(const OnsetEnvelope& e, double bpm0) {
         if (sc[best] - sc[g.downbeat] > kMargin) g.downbeat = best;
     }
     return g;
+}
+
+MixWindows mix_windows(const BeatGrid& g, int phrase) {
+    MixWindows w;
+    w.phrase = phrase;
+    const long f = g.first_sounding_beat;
+    w.entry_beat = f + ((g.downbeat - f) % 4 + 4) % 4;  // primer compás que suena
+    const long room = g.last_sounding_beat + 4 - w.entry_beat;
+    const long phrases = std::max(2L, room / phrase);   // al menos entrada y salida
+    w.exit_beat = w.entry_beat + (phrases - 1) * phrase;
+    return w;
 }
 
 std::vector<LevelCandidate> level_candidates(const OnsetEnvelope& e, const std::vector<TempoCandidate>& cands,

@@ -2,6 +2,7 @@
 #include "mmn/analysis.hpp"
 #include "mmn/audio.hpp"
 #include "mmn/key.hpp"
+#include "mmn/mix.hpp"
 #include "mmn/mxm.hpp"
 
 #include <chrono>
@@ -21,6 +22,7 @@ int usage() {
     std::puts(
         "mmn analyze [--json] fichero...     tempo, primer tiempo y compás\n"
         "mmn key [--chroma] fichero...       tonalidad y Camelot (con --chroma, el cromagrama)\n"
+        "mmn transicion a b salida.wav       mezcla A → B, cuadrada a tiempo y a compás\n"
         "mmn mxm fichero.mxm                 lee un análisis de MixMeister\n"
         "mmn compare audio fichero.mxm       nuevo frente a MixMeister\n"
         "mmn tsv audio fichero.mxm           una línea TSV para la suite de validación");
@@ -248,6 +250,38 @@ int cmd_key(int argc, char** argv) {
     return 0;
 }
 
+
+/// Diagnóstico de ventanas de mezcla: las 4 marcas de MixMeister (entrada inicio/fin, salida
+/// inicio/fin) en tiempos de nuestra rejilla, más nuestro primer/último tiempo con sonido,
+/// compás y número de tiempos. Solo pistas al mismo nivel.
+int cmd_mixdiag(const char* audio, const char* mxm) {
+    const Buffer b = read_audio(audio);
+    const RhythmAnalysis a = analyze_rhythm(to_mono(b), b.sample_rate);
+    const Mxm m = read_mxm(mxm);
+    if (!m.prof || m.prof->arrays.size() < 2 || m.prof->arrays[0].size() < 2 || m.prof->arrays[1].size() < 2) return 1;
+    const auto& g = a.grid;
+    if (std::abs(g.bpm / m.prof->bpm - 1) > 0.02) return 1;
+    auto bt = [&](std::uint64_t s) { return (m.prof->seconds(s) - g.first_beat_s) / g.period(); };
+    const long nbeats = static_cast<long>((a.env.duration() - g.first_beat_s) / g.period());
+    std::printf("%s\t%.3f\t%.3f\t%.3f\t%.3f\t%ld\t%ld\t%d\t%ld\t%.3f\n", base(audio).c_str(), bt(m.prof->arrays[0][0]),
+                bt(m.prof->arrays[0][1]), bt(m.prof->arrays[1][0]), bt(m.prof->arrays[1][1]), g.first_sounding_beat,
+                g.last_sounding_beat, g.downbeat, nbeats, b.seconds());
+    return 0;
+}
+
+
+int cmd_transicion(const char* fa, const char* fb, const char* out) {
+    const Track a = load_track(fa), b = load_track(fb);
+    TransitionInfo info;
+    const Buffer mix = render_transition(a, b, &info);
+    write_wav16(out, mix);
+    std::printf("%s (%.2f BPM) → %s (%.2f BPM)\n", base(fa).c_str(), a.grid.bpm, base(fb).c_str(), b.grid.bpm);
+    std::printf("  solape de %d tiempos: %.2f s → %.2f s (%.2f s)\n", a.windows.phrase, info.start_s,
+                info.start_s + info.length_s, info.length_s);
+    std::printf("  mezcla: %.2f s → %s\n", info.total_s, out);
+    return 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -256,12 +290,14 @@ int main(int argc, char** argv) {
         const std::string c = argv[1];
         if (c == "analyze") return cmd_analyze(argc, argv);
         if (c == "key") return cmd_key(argc, argv);
+        if (c == "transicion" && argc == 5) return cmd_transicion(argv[2], argv[3], argv[4]);
         if (c == "mxm" && argc == 3) return cmd_mxm(argv[2]);
         if (c == "compare" && argc == 4) return cmd_compare(argv[2], argv[3], false);
         if (c == "tsv" && argc == 4) return cmd_compare(argv[2], argv[3], true);
         if (c == "phasediag" && argc == 4) return cmd_phasediag(argv[2], argv[3]);
         if (c == "bardiag" && argc == 4) return cmd_bardiag(argv[2], argv[3]);
         if (c == "leveldiag" && argc == 4) return cmd_leveldiag(argv[2], argv[3]);
+        if (c == "mixdiag" && argc == 4) return cmd_mixdiag(argv[2], argv[3]);
         return usage();
     } catch (const std::exception& e) {
         std::fprintf(stderr, "error: %s\n", e.what());

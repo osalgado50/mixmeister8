@@ -46,6 +46,7 @@ struct BeatGrid {
     double first_beat_s = 0;   ///< primer tiempo >= 0
     int downbeat = 0;          ///< índice (0-3) del tiempo que abre compás, por el sonido (regla aprendida)
     long first_sounding_beat = 0;  ///< índice del primer tiempo con sonido (el compás 1)
+    long last_sounding_beat = 0;   ///< índice del último tiempo con sonido
     double confidence = 0;     ///< pico frente a fondo, 0 = sin pulso
     [[nodiscard]] double period() const { return 60.0 / bpm; }
     [[nodiscard]] double beat_time(long k) const { return first_beat_s + static_cast<double>(k) * period(); }
@@ -82,6 +83,18 @@ std::vector<LevelCandidate> level_candidates(const OnsetEnvelope& env, const std
 
 /// Afina periodo y fase alrededor de `bpm0` por coherencia de fase en toda la pista.
 BeatGrid refine_grid(const OnsetEnvelope& env, double bpm0);
+
+/// Ventanas de mezcla en frases de `phrase` tiempos (8 compases = 32), como MixMeister:
+/// la entrada empieza en el primer compás que suena; la salida termina en la última frase
+/// entera (contada desde la entrada) que cabe antes de que la pista deje de sonar, + 4 tiempos.
+/// Contra los .mxm de la biblioteca (195 pistas): entrada exacta 60 % (±1 compás: 88 %);
+/// salida exacta 77 %.
+struct MixWindows {
+    long entry_beat = 0;   ///< índice del tiempo donde empieza la ventana de entrada
+    long exit_beat = 0;    ///< índice del tiempo donde empieza la ventana de salida
+    int phrase = 32;       ///< longitud de cada ventana, en tiempos
+};
+MixWindows mix_windows(const BeatGrid& g, int phrase = 32);
 
 /// Todo junto: envolvente → candidatos → rejilla → compás.
 struct RhythmAnalysis {
