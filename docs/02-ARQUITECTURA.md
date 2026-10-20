@@ -23,6 +23,13 @@ para uso propio, no para publicar.
 Leer siempre, sin pedir nada: el catálogo de MixMeister, los `.mxm` y los `.mmp`.
 Escribir `.mmp` es deseable para poder volver al original mientras conviva.
 
+## Estado del motor (20-10-2026)
+
+Hecho y validado en `engine/`: E/S de audio, FFT, ritmo (tempo, fase, compás), tonalidad,
+ventanas de mezcla, WSOLA, transiciones y sesiones `.mmp` → WAV + CUE. Cifras en
+`engine/docs/VALIDACION.md`. Siguiente: reproducción en tiempo real (doble salida), los 13
+tipos de transición de `transitions.xml`, escribir `.mmp`, y la app (M0 de abajo).
+
 ## Hoja de ruta
 
 Cada hito se da por terminado cuando sus filas de `01-MAPA-FUNCIONAL.md` pasan a

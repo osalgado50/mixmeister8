@@ -1,37 +1,60 @@
 # MMStudio Next
 
-Proyecto nuevo para reconstruir **MixMeister Studio 7.8** como aplicación moderna,
-nativa en Apple Silicon y 100 % operativa, partiendo de su instalador.
+Reconstrucción moderna de **MixMeister Studio 7.8**: nativa en macOS (Intel y Apple
+Silicon), con un motor de análisis y mezcla escrito desde cero y validado contra lo que el
+propio MixMeister dejó en tu biblioteca.
 
-MixMeister está en *end-of-life*: el binario es solo Intel y **macOS 27 es la
-última versión con Rosetta 2 para apps Intel**. Pasado eso, no arranca.
+MixMeister está en *end-of-life*: el binario es solo Intel y **macOS 27 es la última versión
+con Rosetta 2 para apps Intel**.
 
-## Documentos
+## Estado
 
-- `docs/00-INSTALADOR.md` — qué hay dentro del `.pkg`, cómo se construyó y por qué no tiene futuro tal cual.
-- `docs/01-MAPA-FUNCIONAL.md` — las 56 funciones del original (manual × interfaz × clases) y su estado. Es la **lista de paridad**: el proyecto está acabado cuando no quede ❌.
-- `docs/02-ARQUITECTURA.md` — capas nuevas frente a las originales y hoja de ruta M0–M6.
-- `engine/` — **el motor, escrito desde cero** (C++20). Estado y cifras en `engine/docs/VALIDACION.md`.
-- `docs/spec/ui-nibs.md` — los 29 documentos de interfaz decodificados: ventanas, menús, atajos, ~150 acciones, outlets.
-- `docs/spec/core-data.md` — modelo de datos del catálogo (5 entidades).
-- `docs/spec/strings.md` — mensajes y formatos de la interfaz.
+| Pieza | Estado | Medido contra |
+|---|---|---|
+| Lectura de audio | MP3, WAV; en macOS también M4A/AAC/ALAC/AIFF/FLAC | — |
+| Tempo | **98,6 %** al mismo nivel métrico, mediana **0,005 BPM** | 212 pistas con su `.mxm` |
+| Fase (dónde cae el tiempo) | **86 %** | ídem |
+| Compás | **79 %** | ídem |
+| Tonalidad + Camelot | MIREX **0,652** | 604 pistas de GiantSteps Key |
+| Ventanas de mezcla (8 compases) | entrada 60 % exacta / 88 % ±1 compás; salida 77 % | 195 pistas con su `.mxm` |
+| Cambio de tempo sin cambiar el tono | WSOLA; tono < 1 Hz de error a ±12 % | pruebas sintéticas |
+| Transición entre dos pistas | rampa de tempo, golpes cuadrados, sin saturar | pruebas + escucha |
+| Sesiones `.mmp` de MixMeister | se leen, se encuentra el audio, se renderizan con `.cue` | lista de muestra del instalador |
+| Reproducción en directo, interfaz | pendiente | — |
 
-## Herramientas
+Cifras completas y método: `engine/docs/VALIDACION.md`.
 
-- `tools/extraer.sh "MixMeister Studio.pkg" salida/` — rehace todo el inventario.
-- `tools/xar_extract.py`, `tools/mom.py`, `tools/ib_summary.py` — lo que usa por dentro.
-- REA + Ghidra: `../mm2027/tools/rea-setup.sh` (VM Linux x86_64).
+## Estructura
 
-## Relación con mm2027
+- `engine/` — el motor (C++20, sin dependencias salvo dos cabeceras: minimp3 y doctest).
+- `docs/00-INSTALADOR.md` — qué hay dentro del `.pkg` de MixMeister y por qué no tiene futuro tal cual.
+- `docs/01-MAPA-FUNCIONAL.md` — las 56 funciones del original y su estado: la lista de paridad.
+- `docs/02-ARQUITECTURA.md` — capas nuevas frente a las originales y hoja de ruta.
+- `docs/spec/` — interfaz (29 nibs), modelo de datos y cadenas del original, decodificados.
+- `tools/` — extracción del instalador (`extraer.sh` y auxiliares).
 
-`../mm2027` es trabajo previo propio: núcleo C++ de análisis, estiramiento y
-mezcla, validado con números, más una app SwiftUI. Este proyecto parte de la
-especificación del original y decide qué reaprovecha de ahí (ver arquitectura).
+## Compilar y probar (en el Mac, Terminal)
+
+```bash
+cd engine
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
+./build/mmn_tests
+```
+
+## Usar
+
+```bash
+./build/mmn analyze pista.mp3                  # tempo, fase, compás
+./build/mmn key pista.mp3                      # tonalidad y Camelot
+./build/mmn transicion a.mp3 b.mp3 mezcla.wav  # A → B cuadradas
+./build/mmn sesion lista.mmp mezcla.wav ~/Music   # una sesión de MixMeister entera (+ .cue)
+```
 
 ## Frontera legal
 
-Se inspeccionan metadatos, recursos y ficheros de datos del paquete y se estudia
-el comportamiento del programa (Directiva 2009/24/CE, art. 5.3), y se lee lo que
-escribe para interoperar (art. 6). **No** se descompila código para copiarlo, no
-se toca PACE Eden (elusión de medidas técnicas: LPI arts. 102 c) y 160, Directiva 2001/29)
-y no se reutilizan marca, skins, iconos, efectos AIR ni textos del original.
+Se leen metadatos, recursos y ficheros de datos del original y se estudia su comportamiento
+(Directiva 2009/24/CE, art. 5.3), y se leen sus formatos para interoperar (art. 6). No se
+descompila código para copiarlo, no se toca PACE Eden y no se reutilizan marca, skins,
+iconos, efectos ni textos del original. El motor no contiene código de MixMeister, de mm2027
+ni de proyectos GPL.

@@ -5,6 +5,26 @@ Cada función sale de tres fuentes cruzadas: el **manual** (capítulo), la
 **clases** del binario. La última columna dice dónde está hoy en `mm2027`, el
 trabajo previo propio que puede servir de motor.
 
+
+## Estado en el motor nuevo (`engine/`) — 20-10-2026
+
+El motor nuevo se escribe desde cero (decisión del 20-10-2026) y no reutiliza mm2027. La
+columna «mm2027» de las tablas de abajo queda como referencia histórica; lo que ya cubre el
+motor nuevo, medido:
+
+| Función del original | Motor nuevo |
+|---|---|
+| Análisis BPM / rejilla / compás | ✅ 98,6 % nivel, 86 % fase, 79 % compás (212 pistas) |
+| Tonalidad y keycode | ✅ MIREX 0,652 (GiantSteps), notación Camelot |
+| Anclas de intro / outro (ventanas de mezcla) | ✅ frases de 8 compases, como MixMeister |
+| Mezcla por defecto: transición cuadrada con rampa de tempo | ✅ cruce a potencia constante (falta el resto de los 13 tipos de `transitions.xml`) |
+| Cambio de tempo sin cambio de tono | ✅ WSOLA |
+| Abrir sesiones `.mmp` | ✅ lectura; escribir `.mmp` pendiente |
+| Localizar ficheros perdidos | ✅ por nombre en las carpetas indicadas |
+| Exportar la mezcla a WAV con CUE | ✅ |
+| Leer M4A/AAC | ✅ en macOS |
+| Reproducción en directo, interfaz, efectos, MIDI, categorías | pendiente |
+
 Leyenda: ✅ hecho en mm2027 · 🟡 parcial · ❌ falta · ⛔ no se replica
 
 ## 1. Biblioteca

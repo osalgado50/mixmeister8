@@ -33,7 +33,7 @@ struct TempoCandidate {
 
 struct TempoOptions {
     double min_bpm = 60, max_bpm = 200;
-    double prior_center_bpm = 120;   ///< centro del prior de nivel. 120 > 128 en la biblioteca real (182 frente a 180 de 188)
+    double prior_center_bpm = 120;   ///< ya no lo usa el nivel métrico (regla aprendida); se conserva para quien lo quiera
     double prior_sigma_oct = 0.5;    ///< anchura del prior, en octavas
 };
 
