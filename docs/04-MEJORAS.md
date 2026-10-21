@@ -43,19 +43,38 @@ del reloj, no cuenta lo consumido (comprobado).
   (tonalidad compatible en el círculo de quintas y BPM a menos de un 6 %, o doble/mitad).
 - Seis skins (View › Skin).
 
-## Siguiente (propuesto, por orden de valor)
+## Segunda tanda (21-10-2026): las 7 propuestas, hechas y medidas
 
-1. **Normalización de sonoridad (LUFS)** al exportar (−14 / −9 LUFS, true peak −1 dBTP) y medidor
-   LUFS en el master.
-2. **Forma de onda por frecuencias** (graves rojo, medios verde, agudos azul) en la línea de tiempo
-   y el Song Slicer, para ver los bombos y cuadrar a ojo.
-3. **Sugerencia de siguiente pista** («Find Similar» mejorado): puntuación por tonalidad, BPM y
-   energía, y ordenar una lista automáticamente para que fluya.
-4. **Grabación de la sesión en directo** (lo que sale por la salida principal a un fichero).
-5. **Salida a 48 kHz y exportación a FLAC** (MP3 cuando haya un codificador libre de licencias en
-   macOS).
-6. **Rendimiento en directo**: montar solo las pistas cercanas al cursor (ahora se montan todas las
-   que quedan), menos CPU con listas largas.
-7. **Pruebas automáticas** de regresión en el Mac: render de 5 listas de referencia y comparación
-   bit a bit con la versión anterior en cada compilación.
-8. **Análisis de BPM/tonalidad en paralelo** al añadir muchos ficheros a la biblioteca.
+| # | Mejora | Resultado medido en el Mac |
+|---|---|---|
+| 1 | **Normalización de sonoridad** al exportar (No / −14 / −11 / −9 / −16 LUFS, pico real ≤ −1 dBTP) y **medidor LUFS** (corto plazo, 3 s) junto a los vúmetros | base.mmp a −14 → −14,02 LUFS; a −9 → −9,17 (pico −1,5 dBTP). Medidor propio BS.1770-4 = ffmpeg ebur128 ±0,1 LU |
+| 2 | **Forma de onda por frecuencias** (graves rojo, medios verde, agudos azul), View › Color Waveforms | se ven los bombos; la caché de disco guarda las bandas |
+| 3 | **Find Similar** (tonalidad + BPM + género; con BPM a más de un ~15 % no sugiere) y **Tools › Order Playlist for Harmonic Flow** | Spinning310: compatibilidad media entre pistas seguidas 0,375 → 0,635 |
+| 4 | **Grabar la sesión en directo** (Playback › Record Mix…, ⌥⌘R): WAV de 24 bits de la salida del master | 4,00 s grabados en 4 s de reproducción |
+| 5 | **48 kHz y FLAC** (y WAV/AIFF de 24 bits) | FLAC a 48 kHz correcto (ffprobe) |
+| 6 | **Menos CPU en directo**: solo se montan las pistas cercanas al cursor; el cursor redibuja solo su franja; la forma de onda solo se recorre en la zona sucia y en color se agrupa en 64 colores | Spinning310 en directo: a los 5 min 115 % → 22 % de un núcleo; a los 31 min 104 % → 33 %. Pistas montadas a la vez: 4–6 en vez de 22 |
+| 7 | **Pruebas de regresión automáticas** (`sh tests/regresion.sh`, 16 comprobaciones) | ver abajo |
+
+**Normalización cuando hay que subir mucho:** si para llegar al objetivo los picos pasarían de −1 dBTP,
+la ganancia va antes del limitador (techo −1,5 dBFS) y se busca por la secante (hasta 3 medidas,
+±0,2 LU), porque el limitador comprime y la sonoridad sube menos que la ganancia. Si el limitador tiene
+que recortar más de 6 dB, al terminar sale un aviso («puede sonar aplastada»). Ejemplo real: base.mmp
+tiene el 42 % de sus bloques con picos a menos de 6 dB del máximo; para llegar a −9 LUFS hace falta
++16,9 dB antes del limitador (≈ 11 dB de recorte), y se avisa.
+
+**CPU:** el coste en directo no era el audio sino el dibujo: el cursor redibujaba toda la línea de
+tiempo 60 veces por segundo, y la forma de onda en color creaba un color por píxel que Core Animation
+procesaba uno a uno (medido con `sample`: el 98 % del hilo principal en `CA::Transaction::commit`).
+
+### Pruebas de regresión (`tests/regresion.sh`, en el Mac)
+Efectos propios (15) · ida y vuelta de todas las listas .mmp sin cambiar un byte (640 de 640) ·
+bit a bit (882 000 de 882 000 muestras) · sincronía a 117,6 / 120,016 / 125 BPM (≤ 10 ms en 5 min) ·
+exportación en paralelo = render seguido · normalización a −14 y −9 LUFS (±0,5 LU, ≤ −1 dBTP) ·
+reproducción en directo · grabación · copia de recuperación tras cierre brusco · exportación de la
+lista grande (< 40 s) · ordenar por flujo · Find Similar · CPU en directo (< 60 %).
+
+## Siguiente (propuesto)
+
+1. **Análisis de BPM/tonalidad en paralelo** al añadir muchos ficheros a la biblioteca.
+2. **MP3** al exportar cuando haya un codificador libre de licencias en macOS.
+3. **Efecto en parte de una pista** y **Save as Tweak** (pendientes de la copia del original).

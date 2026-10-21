@@ -5,9 +5,17 @@ import AppKit
 final class TimelineView: NSView {
     var pps: CGFloat = 4 { didSet { invalidateIntrinsicContentSize(); needsDisplay = true } }   // píxeles por segundo
     var rulerMeasures = true { didSet { needsDisplay = true } }
-    var playhead: Double = 0 { didSet { needsDisplay = true } }
+    var playhead: Double = 0 {
+        didSet {
+            guard playhead != oldValue else { return }
+            // Solo la franja del cursor (antes se redibujaba toda la línea de tiempo 60 veces por segundo).
+            for t in [oldValue, playhead] { setNeedsDisplay(NSRect(x: x(t) - 3, y: 0, width: 6, height: bounds.height)) }
+        }
+    }
     static let rulerHeight: CGFloat = 20
     static let tempoLaneHeight: CGFloat = 20   // barra de tempos (marcadores verdes), abajo
+    /// View › Color Waveforms: forma de onda por frecuencias (nuevo en MixMeister 8).
+    static var colorWaveforms = UserDefaults.standard.object(forKey: "MM8 Color Waveforms") as? Bool ?? true
     /// Último clic derecho en la barra de tempos: instante y, si cayó sobre uno, el marcador.
     var laneClick: (time: Double, point: (track: Int, type: UInt32, mix: Double)?) = (0, nil)
     private var trackRects: [(index: Int, rect: NSRect)] = []
@@ -36,7 +44,10 @@ final class TimelineView: NSView {
     func x(_ t: Double) -> CGFloat { CGFloat(t) * pps }
     func time(_ x: CGFloat) -> Double { Double(x / pps) }
 
+    /// Zona que se está redibujando: la forma de onda solo se recorre dentro de ella.
+    private var drawClip = NSRect.zero
     override func draw(_ dirty: NSRect) {
+        drawClip = dirty
         let s = Session.shared
         let L = s.layout
         Theme.background.setFill()
@@ -135,23 +146,41 @@ final class TimelineView: NSView {
             if let p = s.audioPath(item.index), let w = Waveforms.shared.get(p), w.seconds > 0 {
                 let mid = r.minY + header + (r.height - header) / 2
                 let amp = (r.height - header) / 2 - 2
+                let colored = Self.colorWaveforms
                 let wavePath = NSBezierPath()
-                let step: CGFloat = 1
-                var px = r.minX
-                while px < r.maxX {
+                // Solo la parte que se redibuja (con el cursor en marcha es una franja de pocos píxeles).
+                // (alineado a la rejilla de píxeles del segmento, para que la franja encaje con el resto)
+                var px = r.minX + max(0, (max(visibleRect.minX, drawClip.minX) - 2 - r.minX).rounded(.down))
+                let end = min(r.maxX, min(visibleRect.maxX, drawClip.maxX) + 2)
+                // En color, las barras se agrupan por color de la paleta: un relleno por color.
+                var buckets = colored ? [[NSRect]](repeating: [], count: 64) : []
+                while px < end {
                     let tm = time(px)
                     let src = seg.source(item, at: tm)
                     let bin = Int(src / w.seconds * Double(w.peaks.count))
                     if bin >= 0, bin < w.peaks.count {
                         let a = CGFloat(w.peaks[bin]) * amp
-                        wavePath.move(to: NSPoint(x: px, y: mid - a))
-                        wavePath.line(to: NSPoint(x: px, y: mid + a))
+                        if colored {
+                            // Por frecuencias: graves rojo, medios verde, agudos azul (se ven los bombos).
+                            buckets[w.colorIndex(bin)].append(NSRect(x: px, y: mid - a, width: 1, height: max(1, 2 * a)))
+                        } else {
+                            wavePath.move(to: NSPoint(x: px, y: mid - a))
+                            wavePath.line(to: NSPoint(x: px, y: mid + a))
+                        }
                     }
-                    px += step
+                    px += 1
                 }
-                (selected ? Theme.clipSelectedInk.withAlphaComponent(0.85) : Theme.wave).setStroke()
-                wavePath.lineWidth = 1
-                wavePath.stroke()
+                if colored {
+                    let cg = NSGraphicsContext.current?.cgContext
+                    for (i, rects) in buckets.enumerated() where !rects.isEmpty {
+                        cg?.setFillColor(Wave.palette[i].withAlphaComponent(selected ? 1 : 0.85).cgColor)
+                        cg?.fill(rects)
+                    }
+                } else {
+                    (selected ? Theme.clipSelectedInk.withAlphaComponent(0.85) : Theme.wave).setStroke()
+                    wavePath.lineWidth = 1
+                    wavePath.stroke()
+                }
             } else if s.audioPath(item.index) == nil {
                 ("Audio no encontrado" as NSString).draw(at: NSPoint(x: r.minX + 6, y: r.minY + header + 4),
                                                          withAttributes: [.font: Theme.font(10), .foregroundColor: Theme.bass])

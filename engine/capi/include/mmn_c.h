@@ -64,6 +64,21 @@ int mmn_fx_latency(mmn_fx* fx);
 /* Procesa en el sitio; `right` puede ser NULL (mono). */
 void mmn_fx_process(mmn_fx* fx, float* left, float* right, int frames);
 
+/* ---------- Sonoridad (ITU-R BS.1770-4 / EBU R128) -------------------------------------------- */
+
+typedef struct mmn_loud mmn_loud;
+mmn_loud* mmn_loud_new(double sample_rate, int channels);
+void mmn_loud_free(mmn_loud* m);
+void mmn_loud_add(mmn_loud* m, const float* left, const float* right, int frames);
+double mmn_loud_integrated(mmn_loud* m);     /* LUFS, con puertas */
+double mmn_loud_momentary(mmn_loud* m);      /* LUFS, últimos 400 ms */
+double mmn_loud_shortterm(mmn_loud* m);      /* LUFS, últimos 3 s */
+double mmn_loud_truepeak_db(mmn_loud* m);    /* dBTP (sobremuestreo ×4) */
+
+/* Forma de onda por bandas: `out` recibe bins × 4 valores (pico total, graves < 200 Hz,
+ * medios 200 Hz–2 kHz, agudos > 2 kHz), mono. Devuelve la duración en segundos. */
+double mmn_audio_peaks3(const char* path, float* out, size_t bins, char** err);
+
 #ifdef __cplusplus
 }
 #endif

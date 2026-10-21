@@ -1,6 +1,7 @@
 import AVFoundation
 import AppKit
 import UniformTypeIdentifiers
+import MMNEngine
 
 /// Exportar la mezcla (File › Export Playlist to File…, Export Playlist to iTunes…, Burn CD… y
 /// los dos botones de arriba a la derecha de la lista, como en el original).
@@ -9,27 +10,66 @@ import UniformTypeIdentifiers
 /// tiempo real), por bloques de 1024 muestras: en cada bloque se aplican volumen, EQ y tempo.
 enum Exporter {
     enum Kind: Int, CaseIterable {
-        case aiff, wav, aac, aiff24, wav24
-        var title: String { ["AIFF (16 bits)", "WAV (16 bits)", "AAC (M4A)", "AIFF (24 bits)", "WAV (24 bits)"][rawValue] }
-        var ext: String { ["aif", "wav", "m4a", "aif", "wav"][rawValue] }
+        case aiff, wav, aac, aiff24, wav24, flac
+        var title: String { ["AIFF (16 bits)", "WAV (16 bits)", "AAC (M4A)", "AIFF (24 bits)", "WAV (24 bits)", "FLAC (24 bits, sin pérdida)"][rawValue] }
+        var ext: String { ["aif", "wav", "m4a", "aif", "wav", "flac"][rawValue] }
         /// 16 bits: se escribe con dither TPDF (sin él, el redondeo distorsiona los pasajes suaves).
         var is16: Bool { self == .aiff || self == .wav }
         var settings: [String: Any] {
+            let sr = Exporter.sampleRate
             switch self {
-            case .aiff, .aiff24: return [AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: 44100, AVNumberOfChannelsKey: 2,
+            case .aiff, .aiff24: return [AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: sr, AVNumberOfChannelsKey: 2,
                                 AVLinearPCMBitDepthKey: self == .aiff ? 16 : 24, AVLinearPCMIsBigEndianKey: true, AVLinearPCMIsFloatKey: false]
-            case .wav, .wav24: return [AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: 44100, AVNumberOfChannelsKey: 2,
+            case .wav, .wav24: return [AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: sr, AVNumberOfChannelsKey: 2,
                                AVLinearPCMBitDepthKey: self == .wav ? 16 : 24, AVLinearPCMIsBigEndianKey: false, AVLinearPCMIsFloatKey: false]
-            case .aac: return [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 44100, AVNumberOfChannelsKey: 2,
+            case .aac: return [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: sr, AVNumberOfChannelsKey: 2,
                                AVEncoderBitRateKey: 256_000]
+            case .flac: return [AVFormatIDKey: kAudioFormatFLAC, AVSampleRateKey: sr, AVNumberOfChannelsKey: 2,
+                                AVEncoderBitDepthHintKey: 24]
             }
         }
         /// Espacio aproximado por minuto (como «Estimated Disk Space Required» del original).
-        var bytesPerMinute: Double { self == .aac ? 1.9e6 : (is16 ? 10.6e6 : 15.9e6) }
+        var bytesPerMinute: Double { (self == .aac ? 1.9e6 : self == .flac ? 9.5e6 : (is16 ? 10.6e6 : 15.9e6)) * Exporter.sampleRate / 44100 }
     }
     enum Split: Int { case none, songs, labels }
 
-    static let sampleRate = 44100.0
+    /// Frecuencia del render (44,1 o 48 kHz; el CD siempre 44,1). Se fija al empezar cada exportación.
+    static var sampleRate = 44100.0
+
+    /// Opciones de exportación nuevas en MixMeister 8.
+    struct Options {
+        var sampleRate = 44100.0
+        /// Normalizar la sonoridad a este valor (LUFS integrados, EBU R128), sin pasar de −1 dBTP.
+        var normalize: Double? = nil
+    }
+    static var lastReport = ""
+    /// Aviso para el usuario tras exportar (p. ej. si la normalización ha tenido que limitar mucho).
+    static var lastWarning: String?
+
+    /// Mide la sonoridad integrada y el pico real de la mezcla (una pasada de render).
+    static func measure(layout: MixLayout, doc: PLDocument, audioPath: @escaping (Int) -> String?,
+                        progress: (Double) -> Bool) throws -> (lufs: Double, truePeak: Double) {
+        let m = mmn_loud_new(sampleRate, 2)
+        defer { mmn_loud_free(m) }
+        try render(layout: layout, doc: doc, audioPath: audioPath, progress: progress) { buf, _ in
+            guard let ch = buf.floatChannelData else { return }
+            mmn_loud_add(m, ch[0], buf.format.channelCount > 1 ? ch[1] : nil, Int32(buf.frameLength))
+        }
+        return (mmn_loud_integrated(m), mmn_loud_truepeak_db(m))
+    }
+    /// Ganancia para llegar a `target` LUFS sin pasar de −1 dBTP.
+    static func normalizationGain(target: Double, measured: (lufs: Double, truePeak: Double)) -> Double {
+        guard measured.lufs.isFinite else { return 1 }
+        var g = target - measured.lufs
+        if measured.truePeak.isFinite, measured.truePeak + g > -1 { g = -1 - measured.truePeak }
+        lastReport = String(format: "medida %.2f LUFS, pico real %.2f dBTP → ganancia %+.2f dB (objetivo %.1f LUFS)", measured.lufs, measured.truePeak, g, target)
+        Log.write("normalización: " + lastReport)
+        return pow(10, g / 20)
+    }
+    static func applyGain(_ b: AVAudioPCMBuffer, _ g: Float) {
+        guard g != 1, let ch = b.floatChannelData else { return }
+        for c in 0..<Int(b.format.channelCount) { for i in 0..<Int(b.frameLength) { ch[c][i] *= g } }
+    }
 
     /// Instantes de corte (s de la mezcla): inicio de cada canción o cada etiqueta.
     static func cuts(_ split: Split, layout: MixLayout, doc: PLDocument) -> [Double] {
@@ -144,7 +184,7 @@ enum Exporter {
 
     /// Renderiza las muestras [from, to) de la mezcla con un motor propio. Empieza `preroll` antes
     /// (y descuenta el retardo del limitador) para que lo entregado sea igual que en un render seguido.
-    private static func renderRange(layout: MixLayout, doc: PLDocument, audioPath: (Int) -> String?,
+    private static func renderRange(layout: MixLayout, doc: PLDocument, audioPath: @escaping (Int) -> String?,
                                     from: AVAudioFramePosition, to: AVAudioFramePosition, preroll: AVAudioFramePosition,
                                     only: Int? = nil, master: Bool = true,
                                     progress: (AVAudioFramePosition) -> Bool, sink: (AVAudioPCMBuffer, Double) throws -> Void) throws {
@@ -181,9 +221,56 @@ enum Exporter {
     }
 
     /// Exporta a uno o varios ficheros. Devuelve los ficheros escritos.
-    static func toFiles(base: URL, kind: Kind, split: Split, progress: (Double) -> Bool) throws -> [URL] {
+    static func toFiles(base: URL, kind: Kind, split: Split, options: Options = Options(), progress: (Double) -> Bool) throws -> [URL] {
         let s = Session.shared
         let layout = s.layout, doc = s.doc
+        sampleRate = options.sampleRate
+        lastReport = ""
+        lastWarning = nil
+        var gain: Float = 1
+        var prog = progress
+        defer { MixGraph.exportPreGainDB = 0; MixGraph.exportCeilingDB = nil }
+        if let target = options.normalize {
+            let path: (Int) -> String? = { s.audioPath($0) }
+            let m = try measure(layout: layout, doc: doc, audioPath: path) { progress(0.3 * $0) }
+            let g = target - m.lufs
+            if g <= 0 || m.truePeak + g <= -1 {
+                // Basta con una ganancia limpia después del render.
+                gain = Float(normalizationGain(target: target, measured: m))
+                prog = { progress(0.3 + 0.7 * $0) }
+            } else {
+                // Hay que subir más de lo que deja el pico: la ganancia va antes del limitador (techo
+                // −1,5 dBFS, para que el pico real no pase de −1 dBTP). El limitador comprime: la sonoridad crece menos que la ganancia, así que se busca la
+                // ganancia por la secante (hasta 3 medidas, para al quedar a ±0,2 LU).
+                MixGraph.exportCeilingDB = -1.5
+                // (la medida inicial se hizo con el limitador normal, así que no entra en la secante: el
+                // primer paso usa pendiente 1 y los siguientes, las dos últimas medidas con techo −1,5)
+                var prev: (g: Double, l: Double)? = nil
+                var g1 = g, l1 = m.lufs
+                for k in 0..<3 {
+                    MixGraph.exportPreGainDB = g1
+                    l1 = try measure(layout: layout, doc: doc, audioPath: path) { progress(0.3 + 0.15 * (Double(k) + $0)) }.lufs
+                    Log.write(String(format: "normalización: +%.2f dB antes del limitador → %.2f LUFS", g1, l1))
+                    if abs(target - l1) <= 0.2 || !l1.isFinite { break }
+                    var slope = 1.0
+                    if let p = prev, abs(g1 - p.g) > 0.01 { slope = min(1.5, max(0.05, (l1 - p.l) / (g1 - p.g))) }
+                    prev = (g1, l1)
+                    let g2 = min(24, max(0, g1 + (target - l1) / slope))
+                    g1 = g2
+                    MixGraph.exportPreGainDB = g1
+                }
+                lastReport = String(format: "medida %.2f LUFS (pico real %.2f dBTP); ganancia antes del limitador %+.2f dB (techo −1,5 dBFS) para %.1f LUFS",
+                                    m.lufs, m.truePeak, MixGraph.exportPreGainDB, target)
+                Log.write("normalización: " + lastReport)
+                // Cuánto recorta el limitador (ganancia puesta − sonoridad ganada, ≈ objetivo − medida).
+                let squash = MixGraph.exportPreGainDB - (target - m.lufs)
+                if squash > 6 {
+                    lastWarning = String(format: "Para llegar a %.0f LUFS el limitador ha tenido que recortar unos %.0f dB los picos, porque los de la mezcla ya estaban casi al máximo (%.1f LUFS con pico real %.1f dBTP). Puede sonar aplastada; con un objetivo más bajo conservará la pegada.", target, squash, m.lufs, m.truePeak)
+                    Log.write("normalización: aviso, limitación de \(String(format: "%.1f", squash)) dB")
+                }
+                prog = { progress(0.75 + 0.25 * $0) }
+            }
+        }
         let cuts = Self.cuts(split, layout: layout, doc: doc)
         let stem = base.deletingPathExtension().lastPathComponent
         let dir = base.deletingLastPathComponent()
@@ -199,7 +286,8 @@ enum Exporter {
         }
         try open(1)
         var dither = Dither()
-        try render(layout: layout, doc: doc, audioPath: { s.audioPath($0) }, progress: progress) { fbuf, t in
+        try render(layout: layout, doc: doc, audioPath: { s.audioPath($0) }, progress: prog) { fbuf, t in
+            applyGain(fbuf, gain)
             let buf = kind.is16 ? dither.toInt16(fbuf) : fbuf
             // ¿Hay un corte dentro de este bloque?
             let len = Double(buf.frameLength) / sampleRate
@@ -235,6 +323,7 @@ enum Exporter {
     static func cdImage(dir: URL, split: Split, progress: (Double) -> Bool) throws -> URL {
         let s = Session.shared
         let layout = s.layout, doc = s.doc
+        sampleRate = 44100
         if layout.total > 80 * 60 { throw EngineError.message(String(format: "La mezcla dura %d:%02d y no cabe en un CD (máximo 80 minutos).", Int(layout.total) / 60, Int(layout.total) % 60)) }
         let bin = dir.appendingPathComponent("mezcla.bin"), cue = dir.appendingPathComponent("mezcla.cue")
         FileManager.default.createFile(atPath: bin.path, contents: nil)
@@ -307,30 +396,57 @@ final class ExportUI: NSObject {
         guard ready() else { return }
         let p = NSSavePanel()
         p.nameFieldStringValue = (Session.shared.title as NSString).deletingPathExtension
-        let acc = NSView(frame: NSRect(x: 0, y: 0, width: 460, height: 96))
-        let typeL = NSTextField(labelWithString: "Save as type:"); typeL.frame = NSRect(x: 10, y: 66, width: 120, height: 18)
-        let type = NSPopUpButton(frame: NSRect(x: 135, y: 62, width: 180, height: 26)); type.addItems(withTitles: Exporter.Kind.allCases.map(\.title))
+        let acc = NSView(frame: NSRect(x: 0, y: 0, width: 460, height: 156))
+        let typeL = NSTextField(labelWithString: "Save as type:"); typeL.frame = NSRect(x: 10, y: 126, width: 120, height: 18)
+        let type = NSPopUpButton(frame: NSRect(x: 135, y: 122, width: 230, height: 26)); type.addItems(withTitles: Exporter.Kind.allCases.map(\.title))
+        let d = UserDefaults.standard
+        type.selectItem(at: d.integer(forKey: "MM8 Export Kind"))
+        // Nuevo en MixMeister 8: frecuencia y normalización de sonoridad.
+        let srL = NSTextField(labelWithString: "Sample rate:"); srL.frame = NSRect(x: 10, y: 96, width: 120, height: 18)
+        let sr = NSPopUpButton(frame: NSRect(x: 135, y: 92, width: 230, height: 26)); sr.addItems(withTitles: ["44,1 kHz (CD)", "48 kHz (vídeo)"])
+        sr.selectItem(at: d.double(forKey: "MM8 Export Rate") == 48000 ? 1 : 0)
+        let nL = NSTextField(labelWithString: "Normalize:"); nL.frame = NSRect(x: 10, y: 66, width: 120, height: 18)
+        let norm = NSPopUpButton(frame: NSRect(x: 135, y: 62, width: 230, height: 26))
+        norm.addItems(withTitles: Self.normTargets.map(\.0))
+        norm.selectItem(at: d.integer(forKey: "MM8 Export Normalize"))
+        sr.target = self; sr.action = #selector(typeChanged); ratePop = sr
         let splitB = NSButton(checkboxWithTitle: "Create separate files for:", target: nil, action: nil); splitB.frame = NSRect(x: 10, y: 36, width: 200, height: 20)
         let which = NSMatrixLike(["Each song", "Each track using label markers"]); which.view.frame.origin = NSPoint(x: 210, y: 6)
         let size = NSTextField(labelWithString: ""); size.frame = NSRect(x: 10, y: 6, width: 200, height: 18); size.textColor = .secondaryLabelColor
         typePop = type; sizeLabel = size; panel = p
         type.target = self; type.action = #selector(typeChanged)
-        [typeL, type, splitB, which.view, size].forEach { acc.addSubview($0) }
+        [typeL, type, srL, sr, nL, norm, splitB, which.view, size].forEach { acc.addSubview($0) }
         p.accessoryView = acc
         p.allowsOtherFileTypes = true
         typeChanged()
         guard p.runModal() == .OK, let url = p.url else { return }
         let kind = Exporter.Kind(rawValue: type.indexOfSelectedItem) ?? .aiff
         let split: Exporter.Split = splitB.state == .on ? (which.selected == 0 ? .songs : .labels) : .none
-        run("Exportando la mezcla…", work: { prog in try Exporter.toFiles(base: url, kind: kind, split: split, progress: prog) }) { urls in
+        var opt = Exporter.Options()
+        opt.sampleRate = sr.indexOfSelectedItem == 1 ? 48000 : 44100
+        opt.normalize = Self.normTargets[max(0, norm.indexOfSelectedItem)].1
+        d.set(type.indexOfSelectedItem, forKey: "MM8 Export Kind")
+        d.set(opt.sampleRate, forKey: "MM8 Export Rate")
+        d.set(norm.indexOfSelectedItem, forKey: "MM8 Export Normalize")
+        run(opt.normalize == nil ? "Exportando la mezcla…" : "Midiendo la sonoridad y exportando…",
+            work: { prog in try Exporter.toFiles(base: url, kind: kind, split: split, options: opt, progress: prog) }) { urls in
             NSWorkspace.shared.activateFileViewerSelecting(urls)
+            if let w = Exporter.lastWarning {
+                let a = NSAlert()
+                a.messageText = "Exportación terminada, con aviso de sonoridad"
+                a.informativeText = w
+                a.runModal()
+            }
         }
     }
     private weak var typePop: NSPopUpButton?
+    private weak var ratePop: NSPopUpButton?
+    static let normTargets: [(String, Double?)] = [("No", nil), ("−14 LUFS (streaming)", -14), ("−11 LUFS", -11), ("−9 LUFS (club)", -9), ("−16 LUFS (podcast)", -16)]
     private weak var sizeLabel: NSTextField?
     private weak var panel: NSSavePanel?
     @objc private func typeChanged() {
         let k = Exporter.Kind(rawValue: typePop?.indexOfSelectedItem ?? 0) ?? .aiff
+        Exporter.sampleRate = ratePop?.indexOfSelectedItem == 1 ? 48000 : 44100
         panel?.allowedContentTypes = [UTType(filenameExtension: k.ext) ?? .audio]
         sizeLabel?.stringValue = String(format: "Estimated Disk Space Required: %.0f MB", Session.shared.layout.total / 60 * k.bytesPerMinute / 1e6)
     }

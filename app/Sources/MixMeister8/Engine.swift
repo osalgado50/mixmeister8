@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import MMNEngine
 
@@ -148,6 +149,32 @@ struct TrackAnalysis: Codable {
     var key_minor: Bool
 }
 
+/// Forma de onda de un fichero: pico por bin, y graves/medios/agudos (3 por bin).
+struct Wave {
+    var peaks: [Float]
+    var bands: [Float]
+    var seconds: Double
+    /// Color del bin (graves rojo, medios verde, agudos azul), con el brillo según la mezcla.
+    func color(_ bin: Int) -> NSColor {
+        guard bin >= 0, 3 * bin + 2 < bands.count else { return .gray }
+        let l = CGFloat(bands[3 * bin]), m = CGFloat(bands[3 * bin + 1]), h = CGFloat(bands[3 * bin + 2])
+        let mx = max(l, m, h, 1e-6)
+        return NSColor(srgbRed: 0.25 + 0.75 * l / mx, green: 0.25 + 0.75 * m / mx, blue: 0.3 + 0.7 * h / mx, alpha: 0.95)
+    }
+    /// El mismo color reducido a una paleta de 4×4×4 (índice 0..63), para dibujar agrupando por color.
+    func colorIndex(_ bin: Int) -> Int {
+        guard bin >= 0, 3 * bin + 2 < bands.count else { return 0 }
+        let l = bands[3 * bin], m = bands[3 * bin + 1], h = bands[3 * bin + 2]
+        let mx = max(l, m, h, 1e-6)
+        func q(_ v: Float) -> Int { min(3, Int(v / mx * 4)) }
+        return q(l) * 16 + q(m) * 4 + q(h)
+    }
+    static let palette: [NSColor] = (0..<64).map { i in
+        let l = CGFloat(i / 16) / 3, m = CGFloat((i / 4) % 4) / 3, h = CGFloat(i % 4) / 3
+        return NSColor(srgbRed: 0.25 + 0.75 * l, green: 0.25 + 0.75 * m, blue: 0.3 + 0.7 * h, alpha: 0.95)
+    }
+}
+
 enum Engine {
     static var version: String { String(cString: mmn_version()) }
 
@@ -158,6 +185,20 @@ enum Engine {
         let secs = out.withUnsafeMutableBufferPointer { mmn_audio_peaks(path, $0.baseAddress, bins, &err) }
         if secs < 0 { throw takeError(err) }
         return (out, secs)
+    }
+
+    /// Forma de onda por bandas: pico total y graves/medios/agudos por bin.
+    static func peaks3(path: String, bins: Int) throws -> Wave {
+        var out = [Float](repeating: 0, count: bins * 4)
+        var err: UnsafeMutablePointer<CChar>?
+        let secs = out.withUnsafeMutableBufferPointer { mmn_audio_peaks3(path, $0.baseAddress, bins, &err) }
+        if secs < 0 { throw takeError(err) }
+        var w = Wave(peaks: [Float](repeating: 0, count: bins), bands: [Float](repeating: 0, count: bins * 3), seconds: secs)
+        for i in 0..<bins {
+            w.peaks[i] = out[4 * i]
+            for b in 0..<3 { w.bands[3 * i + b] = out[4 * i + 1 + b] }
+        }
+        return w
     }
 
     static func analyze(path: String) throws -> TrackAnalysis {

@@ -63,4 +63,5 @@ descompila código para copiarlo, no se toca PACE Eden y no se reutilizan marca,
 iconos, efectos ni textos del original. El motor no contiene código de MixMeister, de mm2027
 ni de proyectos GPL.
 
-- [docs/04-MEJORAS.md](docs/04-MEJORAS.md): mejoras sobre el original (calidad de audio, sincronía, velocidad, estabilidad) con sus mediciones.
+- [docs/04-MEJORAS.md](docs/04-MEJORAS.md): mejoras sobre el original (calidad de audio, sincronía, velocidad, estabilidad, LUFS, grabación, FLAC/48 kHz, sugerencias) con sus mediciones.
+- [tests/regresion.sh](tests/regresion.sh): pruebas de regresión de punta a punta en el Mac (`sh tests/regresion.sh` desde la carpeta del repositorio, con la app compilada en `build/`).

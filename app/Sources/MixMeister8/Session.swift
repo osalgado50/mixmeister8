@@ -235,12 +235,12 @@ enum RecentFiles {
 /// Formas de onda calculadas en segundo plano con el motor.
 final class Waveforms {
     static let shared = Waveforms()
-    private var cache: [String: (peaks: [Float], seconds: Double)] = [:]
+    private var cache: [String: Wave] = [:]
     private var pending: Set<String> = []
     private let queue = DispatchQueue(label: "mm8.waveforms", qos: .utility, attributes: .concurrent)
     static let bins = 4096
 
-    func get(_ path: String) -> (peaks: [Float], seconds: Double)? { cache[path] }
+    func get(_ path: String) -> Wave? { cache[path] }
 
     /// Caché en disco (~/Library/Caches/es.mixmeister8/peaks): la forma de onda de un fichero se
     /// calcula una vez (hay que decodificar todo el audio) y en los arranques siguientes se lee.
@@ -254,20 +254,21 @@ final class Waveforms {
         guard let a = try? FileManager.default.attributesOfItem(atPath: path),
               let size = a[.size] as? Int64, let mod = a[.modificationDate] as? Date else { return nil }
         var h: UInt64 = 1469598103934665603
-        for b in "\(path)|\(size)|\(mod.timeIntervalSince1970)|\(bins)".utf8 { h = (h ^ UInt64(b)) &* 1099511628211 }
+        for b in "v2|\(path)|\(size)|\(mod.timeIntervalSince1970)|\(bins)".utf8 { h = (h ^ UInt64(b)) &* 1099511628211 }
         return diskDir.appendingPathComponent(String(format: "%016llx.peaks", h))
     }
-    private static func load(_ path: String) -> (peaks: [Float], seconds: Double)? {
-        guard useDisk, let u = diskKey(path), let d = try? Data(contentsOf: u), d.count == 8 + bins * 4 else { return nil }
+    private static func load(_ path: String) -> Wave? {
+        guard useDisk, let u = diskKey(path), let d = try? Data(contentsOf: u), d.count == 8 + bins * 16 else { return nil }
         let secs = d.withUnsafeBytes { $0.load(as: Double.self) }
-        let peaks = d.subdata(in: 8..<d.count).withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
-        return (peaks, secs)
+        let all = d.subdata(in: 8..<d.count).withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
+        return Wave(peaks: Array(all[0..<bins]), bands: Array(all[bins...]), seconds: secs)
     }
-    private static func store(_ path: String, _ r: (peaks: [Float], seconds: Double)) {
-        guard useDisk, let u = diskKey(path), r.peaks.count == bins else { return }
+    private static func store(_ path: String, _ r: Wave) {
+        guard useDisk, let u = diskKey(path), r.peaks.count == bins, r.bands.count == 3 * bins else { return }
         var d = Data()
         withUnsafeBytes(of: r.seconds) { d.append(contentsOf: $0) }
         r.peaks.withUnsafeBytes { d.append(contentsOf: $0) }
+        r.bands.withUnsafeBytes { d.append(contentsOf: $0) }
         try? d.write(to: u, options: .atomic)
     }
     private var started: Date?
@@ -279,7 +280,7 @@ final class Waveforms {
         pending.insert(path)
         queue.async {
             var r = Self.load(path)
-            if r == nil, let p = try? Engine.peaks(path: path, bins: Self.bins) { r = p; Self.store(path, p) }
+            if r == nil, let p = try? Engine.peaks3(path: path, bins: Self.bins) { r = p; Self.store(path, p) }
             DispatchQueue.main.async {
                 self.pending.remove(path)
                 if let r { self.cache[path] = r }

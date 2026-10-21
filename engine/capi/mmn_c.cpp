@@ -261,6 +261,37 @@ double mmn_audio_peaks(const char* path, float* out, size_t bins, char** err) {
     }
 }
 
+double mmn_audio_peaks3(const char* path, float* out, size_t bins, char** err) {
+    try {
+        const Buffer b = read_audio(path);
+        const auto n = b.frames();
+        std::fill(out, out + bins * 4, 0.0f);
+        if (n == 0 || bins == 0) return 0;
+        // Bandas con filtros de un polo (graves < 200 Hz, agudos > 2 kHz, medios entre ambos).
+        const double sr = b.sample_rate;
+        const double al = 1 - std::exp(-2 * 3.14159265358979 * 200 / sr), ah = 1 - std::exp(-2 * 3.14159265358979 * 2000 / sr);
+        double lp200 = 0, lp2k = 0;
+        const std::size_t nc = b.ch.size();
+        for (std::size_t i = 0; i < n; ++i) {
+            double x = 0;
+            for (const auto& ch : b.ch) x += ch[i];
+            x /= static_cast<double>(nc);
+            lp200 += (x - lp200) * al;
+            lp2k += (x - lp2k) * ah;
+            const double lo = lp200, mid = lp2k - lp200, hi = x - lp2k;
+            float* o = out + 4 * std::min(bins - 1, i * bins / n);
+            o[0] = std::max(o[0], static_cast<float>(std::fabs(x)));
+            o[1] = std::max(o[1], static_cast<float>(std::fabs(lo)));
+            o[2] = std::max(o[2], static_cast<float>(std::fabs(mid)));
+            o[3] = std::max(o[3], static_cast<float>(std::fabs(hi)));
+        }
+        return b.seconds();
+    } catch (const std::exception& e) {
+        set_err(err, e.what());
+        return -1;
+    }
+}
+
 char* mmn_analyze_json(const char* path, char** err) {
     try {
         const Buffer b = read_audio(path);

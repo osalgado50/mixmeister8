@@ -121,10 +121,19 @@ final class LibraryPane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSS
 
     @objc private func filter() {
         let q = search.stringValue.trimmingCharacters(in: .whitespaces).lowercased()
-        let cat = category.indexOfSelectedItem > 0 ? category.titleOfSelectedItem : nil
+        if similarTo != nil, category.indexOfSelectedItem != category.numberOfItems - 1 { similarTo = nil; removeSimilarItem() }
+        let cat = category.indexOfSelectedItem > 0 && similarTo == nil ? category.titleOfSelectedItem : nil
         rows = Session.shared.catalog.items.filter { it in
             (cat == nil || it.categories.contains(cat!)) &&
                 (q.isEmpty || [it.title, it.artist, it.album, it.genre, it.path].contains { $0.lowercased().contains(q) })
+        }
+        if let ref = similarTo {
+            // Find Similar Tracks: las compatibles, de más a menos.
+            rows = rows.filter { $0.path != ref.path && Similarity.bpmScore($0.bpm, ref.bpm) >= 0.25 }.map { ($0, Similarity.score($0, ref)) }.filter { $0.1 >= 0.45 }
+                .sorted { $0.1 > $1.1 }.map(\.0)
+            table.reloadData()
+            empty.isHidden = true
+            return
         }
         applySort()
         table.reloadData()
@@ -143,6 +152,23 @@ final class LibraryPane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSS
         for v in libraryControls { v.isHidden = i == 1 }
     }
     var showingEffects: Bool { tabs.selectedSegment == 1 }
+
+    // MARK: Find Similar Tracks
+
+    private(set) var similarTo: LibraryItem?
+    /// Muestra en la biblioteca las pistas que mezclan bien con `ref` (de más a menos compatibles).
+    func showSimilar(to ref: LibraryItem) {
+        showTab(0)
+        removeSimilarItem()
+        similarTo = ref
+        category.addItem(withTitle: "Similar to «\(ref.title.isEmpty ? (ref.path as NSString).lastPathComponent : ref.title)»")
+        category.selectItem(at: category.numberOfItems - 1)
+        filter()
+    }
+    private func removeSimilarItem() {
+        if let last = category.itemTitles.last, last.hasPrefix("Similar to ") { category.removeItem(at: category.numberOfItems - 1) }
+    }
+    var firstSelectedLibraryItem: LibraryItem? { selectedItems.first }
 
     // MARK: Compatibles con la pista seleccionada (nuevo en MixMeister 8)
 
@@ -313,5 +339,44 @@ enum KeyColors {
         guard let n else { return Theme.textDim }
         let h = (CGFloat((n - 1) % 12) / 12.0 + 0.18).truncatingRemainder(dividingBy: 1)
         return NSColor(hue: h, saturation: 0.62, brightness: 0.95, alpha: 1)
+    }
+}
+
+/// Compatibilidad entre dos pistas para mezclarlas: tonalidad (círculo de quintas) y tempo.
+enum Similarity {
+    static func keyScore(_ a: LibraryItem, _ b: LibraryItem) -> Double {
+        guard let n = a.keyCodeNumber, let m = b.keyCodeNumber else { return 0.4 }      // sin tonalidad: neutro
+        if a.minor != b.minor { return n == m ? 0.85 : 0 }                               // relativa mayor/menor
+        let d = min(abs(n - m), 12 - abs(n - m))
+        return [1.0, 0.85, 0.3][min(d, 2)] * (d > 2 ? 0 : 1)
+    }
+    static func bpmScore(_ a: Double, _ b: Double) -> Double {
+        guard a > 0, b > 0 else { return 0.3 }
+        let d = [1.0, 2.0, 0.5].map { abs(a * $0 - b) / b }.min()!                      // también doble/mitad
+        return max(0, 1 - d / 0.08)
+    }
+    /// Tonalidad y tempo pesan igual, pero sin tempo mezclable (más de un 8 %) no vale la tonalidad.
+    static func score(_ a: LibraryItem, _ b: LibraryItem) -> Double {
+        let t = bpmScore(a.bpm, b.bpm)
+        return (0.5 * keyScore(a, b) + 0.5 * t) * (t > 0 ? 1 : 0.3) + (!a.genre.isEmpty && a.genre == b.genre ? 0.05 : 0)
+    }
+    /// Orden de la lista para que fluya: la primera se queda; después, siempre la más compatible con
+    /// la anterior de las que quedan (vecino más cercano).
+    static func flowOrder(_ items: [LibraryItem?]) -> [Int] {
+        guard items.count > 2 else { return Array(items.indices) }
+        var order = [0], left = Set(items.indices.dropFirst())
+        while !left.isEmpty {
+            let cur = items[order.last!]
+            let next = left.max { a, b in
+                let sa = cur.flatMap { c in items[a].map { score($0, c) } } ?? 0
+                let sb = cur.flatMap { c in items[b].map { score($0, c) } } ?? 0
+                return sa == sb ? a > b : sa < sb
+            }!
+            order.append(next); left.remove(next)
+        }
+        return order
+    }
+    static func totalFlow(_ items: [LibraryItem?]) -> Double {
+        zip(items, items.dropFirst()).reduce(0) { acc, p in acc + ((p.0).flatMap { a in (p.1).map { score($0, a) } } ?? 0) }
     }
 }

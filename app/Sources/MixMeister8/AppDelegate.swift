@@ -1,6 +1,7 @@
 import AppKit
 import UniformTypeIdentifiers
 import AVFoundation
+import MMNEngine
 
 /// Arranque, ventana principal y las acciones de los menús. Los selectores son los mismos que los
 /// del original (openPlayList:, view4Strips:, snapToBeat:…), así los menús generados del nib
@@ -53,14 +54,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         // Prueba de audio: MixMeister8 lista.mmp --playtest INSTANTE  (suena 4 s y anota niveles)
         if let i = args.firstIndex(of: "--playtest"), i + 1 < args.count, let t0 = Double(args[i + 1]) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                if let j = args.firstIndex(of: "--record"), j + 1 < args.count { Player.shared.startRecording(to: URL(fileURLWithPath: args[j + 1])) }
                 Player.shared.play(from: t0)
                 var n = 0
                 Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { tm in
                     let p = Player.shared
-                    print(String(format: "PLAYTEST pos=%.2f playing=%d L=%.3f R=%.3f chains_ok", p.position, p.isPlaying ? 1 : 0, p.peakL, p.peakR))
+                    print(String(format: "PLAYTEST pos=%.2f playing=%d L=%.3f R=%.3f pistas_montadas=%d LUFS=%.1f", p.position, p.isPlaying ? 1 : 0, p.peakL, p.peakR, p.chainCount, p.shortTermLUFS))
                     fflush(stdout)
                     n += 1
-                    if n >= 8 { tm.invalidate(); p.stop(); NSApp.terminate(nil) }
+                    let total = args.firstIndex(of: "--playsecs").flatMap { $0 + 1 < args.count ? Int(args[$0 + 1]) : nil } ?? 4
+                    if n >= total * 2 {
+                        tm.invalidate()
+                        if p.isRecording { p.stopRecording(); print(String(format: "RECORD %.2f s grabados", p.recordedSeconds)) }
+                        p.stop(); NSApp.terminate(nil)
+                    }
                 }
             }
         }
@@ -71,8 +78,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             DispatchQueue.global().asyncAfter(deadline: .now() + 1.5) {
                 let t0 = Date()
                 do {
-                    let urls = try Exporter.toFiles(base: out, kind: .wav, split: split) { _ in true }
-                    print("EXPORTTEST ok \(urls.count) ficheros en \(String(format: "%.1f", Date().timeIntervalSince(t0))) s: \(urls.map(\.lastPathComponent).joined(separator: ", "))")
+                    var opt = Exporter.Options()
+                    if let j = args.firstIndex(of: "--normalize"), j + 1 < args.count { opt.normalize = Double(args[j + 1]) }
+                    if let j = args.firstIndex(of: "--rate"), j + 1 < args.count, let r = Double(args[j + 1]) { opt.sampleRate = r }
+                    let kind: Exporter.Kind = args.contains("--flac") ? .flac : (args.contains("--wav24") ? .wav24 : .wav)
+                    let urls = try Exporter.toFiles(base: out, kind: kind, split: split, options: opt) { _ in true }
+                    print("EXPORTTEST ok \(urls.count) ficheros en \(String(format: "%.1f", Date().timeIntervalSince(t0))) s: \(urls.map(\.lastPathComponent).joined(separator: ", ")) \(Exporter.lastReport)" + (Exporter.lastWarning.map { " AVISO: " + $0 } ?? ""))
                 } catch { print("EXPORTTEST error \(error.localizedDescription)") }
                 if args.contains("--cd") {
                     do { let c = try Exporter.cdImage(dir: out.deletingLastPathComponent(), split: .songs) { _ in true }; print("CDTEST ok \(c.path)") }
@@ -115,6 +126,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             fflush(stdout)
         }
         if args.contains("--effectslist") { viewEffects(nil) }
+        // --similar N: las 6 más compatibles con la pista N; --orderflow: reordenar y decir cuánto mejora.
+        if let i = args.firstIndex(of: "--similar"), i + 1 < args.count, let n = Int(args[i + 1]), n <= session.doc.tracks.count,
+           let ref = session.libraryItem(for: session.doc.tracks[n - 1]) {
+            session.selectedTrack = n - 1
+            findSimilarTracks(nil)
+            let top = session.catalog.items.filter { $0.path != ref.path && Similarity.bpmScore($0.bpm, ref.bpm) >= 0.25 }.map { ($0, Similarity.score($0, ref)) }.sorted { $0.1 > $1.1 }.prefix(6)
+            print("SIMILAR a «\(ref.title)» (\(ref.keyText), \(ref.bpm) BPM): " + top.map { String(format: "%@ [%@ %.1f] %.2f", $0.0.title, $0.0.keyText, $0.0.bpm, $0.1) }.joined(separator: " · "))
+            fflush(stdout)
+            if !args.contains("--snapshot") { NSApp.terminate(nil) }
+        }
+        if args.contains("--orderflow") {
+            let items = session.doc.tracks.map { session.libraryItem(for: $0) }
+            let order = Similarity.flowOrder(items)
+            print(String(format: "ORDERFLOW compatibilidad media entre pistas seguidas: %.3f → %.3f; orden: %@", Similarity.totalFlow(items) / Double(max(1, items.count - 1)),
+                         Similarity.totalFlow(order.map { items[$0] }) / Double(max(1, items.count - 1)), order.map { "\($0 + 1)" }.joined(separator: " ")))
+            fflush(stdout)
+            if !args.contains("--snapshot") { NSApp.terminate(nil) }
+        }
         // Prueba de calidad: --nulltest audio.mp3 salida.wav — una sola pista a su tempo, sin
         // marcadores, exportada a 24 bits (debe salir idéntica al audio decodificado).
         if let i = args.firstIndex(of: "--nulltest"), i + 2 < args.count {
@@ -166,6 +195,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                 fflush(stdout)
                 DispatchQueue.main.async { NSApp.terminate(nil) }
             }
+        }
+        // --lufs fichero: sonoridad integrada y pico real de cualquier fichero de audio.
+        if let i = args.firstIndex(of: "--lufs"), i + 1 < args.count {
+            if let f = try? AVAudioFile(forReading: URL(fileURLWithPath: args[i + 1])),
+               let buf = AVAudioPCMBuffer(pcmFormat: f.processingFormat, frameCapacity: 65536) {
+                let m = mmn_loud_new(f.processingFormat.sampleRate, Int32(f.processingFormat.channelCount))
+                while (try? f.read(into: buf)) != nil, buf.frameLength > 0, let ch = buf.floatChannelData {
+                    mmn_loud_add(m, ch[0], f.processingFormat.channelCount > 1 ? ch[1] : nil, Int32(buf.frameLength))
+                }
+                print(String(format: "LUFS %.2f TP %.2f", mmn_loud_integrated(m), mmn_loud_truepeak_db(m)))
+                mmn_loud_free(m)
+            } else { print("LUFS error") }
+            fflush(stdout)
+            NSApp.terminate(nil)
+        }
+        // --roundtrip carpeta: abre cada .mmp, lo pasa por la app (JSON) y lo guarda; debe salir idéntico.
+        if let i = args.firstIndex(of: "--roundtrip"), i + 1 < args.count {
+            let dir = args[i + 1]
+            var ok = 0, bad: [String] = [], total = 0
+            let en = FileManager.default.enumerator(atPath: dir)
+            while let f = en?.nextObject() as? String {
+                guard f.lowercased().hasSuffix(".mmp") else { continue }
+                total += 1
+                let p = (dir as NSString).appendingPathComponent(f)
+                let tmp = NSTemporaryDirectory() + "mm8-rt.mmp"
+                do {
+                    let e = try EngineDocument(path: p)
+                    try e.write(try e.read())
+                    try e.save(to: tmp)
+                    if FileManager.default.contentsEqual(atPath: p, andPath: tmp) { ok += 1 } else { bad.append(f) }
+                } catch { bad.append(f + " (\(error.localizedDescription))") }
+            }
+            print("ROUNDTRIP \(ok) de \(total) idénticas" + (bad.isEmpty ? "" : "; distintas: " + bad.prefix(5).joined(separator: ", ")))
+            fflush(stdout)
+            NSApp.terminate(nil)
         }
         // Velocidad: --wavetime espera a tener todas las formas de onda y dice cuánto tardó.
         if args.contains("--wavetime") {
@@ -244,7 +308,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ s: NSApplication) -> Bool { true }
     /// Arrancada para una prueba (--snapshot, --exporttest…): al acabar se cierra sin preguntar.
-    private let testMode = CommandLine.arguments.contains { ["--snapshot", "--exporttest", "--serial", "--playtest", "--dumpbpm", "--fxtest", "--saveas", "--nulltest", "--synctest", "--quit", "--wavetime", "--crashtest"].contains($0) }
+    private let testMode = CommandLine.arguments.contains { ["--snapshot", "--exporttest", "--serial", "--playtest", "--dumpbpm", "--fxtest", "--saveas", "--nulltest", "--synctest", "--quit", "--lufs", "--roundtrip", "--wavetime", "--crashtest", "--similar", "--orderflow"].contains($0) }
     func applicationShouldTerminate(_ s: NSApplication) -> NSApplication.TerminateReply {
         testMode || confirmDiscard() ? .terminateNow : .terminateCancel
     }
@@ -274,6 +338,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             }
         }
         retarget(main)
+        // Nuevo en MixMeister 8: Playback › Record Mix…, Library › Find Similar / Tools › Order
+        // Playlist for Harmonic Flow, View › Color Waveforms.
+        if let pb = main.items.first(where: { $0.title == "Playback" })?.submenu {
+            pb.addItem(.separator())
+            let it = NSMenuItem(title: "Record Mix…", action: #selector(recordMix(_:)), keyEquivalent: "r")
+            it.keyEquivalentModifierMask = [.command, .option]
+            it.target = self
+            pb.addItem(it)
+        }
+        if let tools = main.items.first(where: { $0.title == "Tools" })?.submenu {
+            tools.addItem(.separator())
+            let it = NSMenuItem(title: "Order Playlist for Harmonic Flow", action: #selector(orderForFlow(_:)), keyEquivalent: "")
+            it.target = self
+            tools.addItem(it)
+        }
+        if let view = main.items.first(where: { $0.title == "View" })?.submenu {
+            let it = NSMenuItem(title: "Color Waveforms", action: #selector(toggleColorWaveforms(_:)), keyEquivalent: "")
+            it.target = self
+            view.addItem(.separator())
+            view.addItem(it)
+        }
         // View › Skin: los seis aspectos.
         if let view = main.items.first(where: { $0.title == "View" })?.submenu {
             view.addItem(.separator())
@@ -397,6 +482,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         case let s where s.hasPrefix("snapTo"):
             item.state = snapCodes[s] == snapType ? .on : .off
         case "viewLibrary:": item.state = !library.isHidden && !library.showingEffects ? .on : .off
+        case "recordMix:": item.title = player.isRecording ? "Stop Recording" : "Record Mix…"
+        case "toggleColorWaveforms:": item.state = TimelineView.colorWaveforms ? .on : .off
+        case "orderForFlow:": return session.doc.tracks.count > 2
         case "viewEffects:": item.state = !library.isHidden && library.showingEffects ? .on : .off
         case "addEffectsParameterMarker:":
             return session.trackedParam != nil && session.trackedParam?.track == session.selectedTrack
@@ -705,6 +793,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             d.tracks[item.index].layer = layer
         }
         Log.write("Master BPM → \(v) en \(String(format: "%.2f", t)) s (pista \(item.index + 1))")
+    }
+
+    // MARK: Nuevo en MixMeister 8
+
+    @objc func recordMix(_ s: Any?) {
+        if player.isRecording {
+            let u = player.recordURL
+            player.stopRecording()
+            if let u { NSWorkspace.shared.activateFileViewerSelecting([u]) }
+            return
+        }
+        let p = NSSavePanel()
+        p.nameFieldStringValue = "Sesión \(DateFormatter.localizedString(from: Date(), dateStyle: .short, timeStyle: .short).replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: ".")).wav"
+        p.allowedContentTypes = [.wav]
+        guard p.runModal() == .OK, let u = p.url else { return }
+        player.startRecording(to: u)
+    }
+    /// Find Similar Tracks (lista y biblioteca): las que mezclan bien con la seleccionada.
+    @objc func findSimilarTracks(_ s: Any?) {
+        guard let i = session.selectedTrack, i < session.doc.tracks.count, let ref = session.libraryItem(for: session.doc.tracks[i]) else { NSSound.beep(); return }
+        library.isHidden = false
+        library.showSimilar(to: ref)
+    }
+    @objc func findSimilarItems(_ s: Any?) {
+        guard let ref = library.firstSelectedLibraryItem else { NSSound.beep(); return }
+        library.showSimilar(to: ref)
+    }
+    /// Tools › Order Playlist for Harmonic Flow: reordena la lista (con deshacer) para que cada pista
+    /// mezcle bien con la anterior; la primera no se mueve.
+    @objc func orderForFlow(_ s: Any?) {
+        let items = session.doc.tracks.map { session.libraryItem(for: $0) }
+        let order = Similarity.flowOrder(items)
+        let before = Similarity.totalFlow(items), after = Similarity.totalFlow(order.map { items[$0] })
+        Log.write(String(format: "orden por flujo: compatibilidad %.2f → %.2f", before, after))
+        guard after > before + 1e-9 else { return }
+        session.mutate("Order Playlist for Harmonic Flow") { d in
+            d.tracks = order.map { d.tracks[$0] }
+            Self.linkTransitions(&d)
+        }
+    }
+    @objc func toggleColorWaveforms(_ s: Any?) {
+        TimelineView.colorWaveforms.toggle()
+        UserDefaults.standard.set(TimelineView.colorWaveforms, forKey: "MM8 Color Waveforms")
+        NotificationCenter.default.post(name: .viewOptionsChanged, object: nil)
     }
 
     // MARK: View

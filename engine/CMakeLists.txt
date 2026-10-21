@@ -41,7 +41,7 @@ target_link_libraries(mmn_tests PRIVATE mmn)
 add_test(NAME mmn_tests COMMAND mmn_tests)
 
 # API en C para la app (y la comprobación de ida y vuelta por JSON contra listas reales)
-add_library(mmn_c capi/mmn_c.cpp capi/mmn_fx.cpp)
+add_library(mmn_c capi/mmn_c.cpp capi/mmn_fx.cpp capi/mmn_loud.cpp)
 target_include_directories(mmn_c PUBLIC capi/include)
 target_link_libraries(mmn_c PUBLIC mmn)
 add_executable(mmn_capi_check tools/capi_check.cpp)

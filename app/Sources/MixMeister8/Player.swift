@@ -75,6 +75,8 @@ final class MixGraph {
     /// Limitador del master (DSP del motor, con anticipación de 1,5 ms): por debajo de −0,3 dBFS no
     /// toca el audio; evita que los solapes saturen.
     private let limiter = AVAudioUnitEffect(audioComponentDescription: FxCatalog.dspDescription(MMN_FX_LIMITER))
+    /// Salida final (tras el limitador): lo que se graba con Record Mix.
+    var outputTapNode: AVAudioNode { limiter }
     /// Retardo del limitador en muestras (la exportación lo descuenta).
     var latencyFrames: Int { master ? 66 : 0 }
     /// Solo una pista (exportación en paralelo: una pista por motor) y sin la sección del master.
@@ -113,10 +115,55 @@ final class MixGraph {
 
     /// Crea las cadenas de las pistas que aún suenan después de `from`. Devuelve cuántas.
     @discardableResult
-    func build(from: Double, audioPath: (Int) -> String?) -> Int {
+    func build(from: Double, audioPath: @escaping (Int) -> String?, horizon: Double? = nil) -> Int {
+        pendingPath = audioPath
         for item in layout.items where item.mixEnd > from && !item.segments.isEmpty && (only == nil || only == item.index) {
+            // En directo solo se montan las pistas que entran pronto; las demás, al acercarse (extend).
+            if let h = horizon, item.mixStart > from + h { pending.append(item); continue }
+            if let c = makeChain(item, audioPath: audioPath) { chains.append(c) }
+        }
+        return finishBuild()
+    }
+
+    // MARK: Montaje por pistas (en directo, solo las cercanas al cursor)
+
+    private var pending: [MixLayout.Item] = []
+    private var pendingPath: ((Int) -> String?)?
+    /// Pistas montadas ahora mismo (diagnóstico).
+    var chainCount: Int { chains.count }
+    var hasAudio: Bool { !chains.isEmpty || !pending.isEmpty }
+
+    /// Monta las pistas que entran en los próximos `lead` s y desmonta las que acabaron hace más de
+    /// 8 s (para que suenen las colas de los efectos). `startAt` da el instante de la mezcla y el
+    /// tiempo de reloj en que puede arrancar un reproductor nuevo.
+    func extend(at mix: Double, lead: Double = 20, startAt: () -> (mix: Double, when: AVAudioTime)) {
+        let ready = pending.filter { $0.mixStart < mix + lead }
+        if !ready.isEmpty, let path = pendingPath {
+            pending.removeAll { p in ready.contains { $0.index == p.index } }
+            for item in ready {
+                guard let c = makeChain(item, audioPath: path) else { continue }
+                let s = startAt()
+                scheduleChain(c, from: s.mix)
+                c.player.play(at: s.when)
+                chains.append(c)
+                Log.write(String(format: "montada pista %d (entra en %.1f s; %d montadas)", item.index + 1, item.mixStart, chains.count))
+            }
+        }
+        let done = chains.filter { mix > $0.item.mixEnd + 8 }
+        for c in done { unmount(c) }
+        if !done.isEmpty { chains.removeAll { c in done.contains { $0.index == c.index } } }
+    }
+    private func unmount(_ c: Chain) {
+        c.player.stop()
+        for n in [c.player, c.pitch, c.eq, c.gain].compactMap({ $0 as AVAudioNode? }) + c.fx.map(\.node) {
+            engine.disconnectNodeOutput(n); engine.detach(n)
+        }
+        for f in c.fx { f.node.reset() }
+    }
+
+    private func makeChain(_ item: MixLayout.Item, audioPath: (Int) -> String?) -> Chain? {
             guard item.index < doc.tracks.count, let path = audioPath(item.index),
-                  let file = try? AVAudioFile(forReading: URL(fileURLWithPath: path)) else { continue }
+                  let file = try? AVAudioFile(forReading: URL(fileURLWithPath: path)) else { return nil }
             let t = doc.tracks[item.index]
             func env(_ kinds: [UInt32]) -> [(t: Double, db: Double)] {
                 t.markers.filter { kinds.contains($0.type) }.map { (Double($0.pos_us) * 1e-6, $0.value) }.sorted { $0.t < $1.t }
@@ -157,10 +204,17 @@ final class MixGraph {
                 last = n
             }
             engine.connect(last, to: engine.mainMixerNode, format: fmt)
-            chains.append(c)
-        }
+            return c
+    }
+
+    /// Exportación normalizada: ganancia antes del limitador y su techo (dBFS).
+    static var exportPreGainDB = 0.0
+    static var exportCeilingDB: Double? = nil
+
+    private func finishBuild() -> Int {
         guard master else { return chains.count }
-        engine.mainMixerNode.outputVolume = Float(pow(10, doc.master_gain_db / 20))
+        engine.mainMixerNode.outputVolume = Float(pow(10, (doc.master_gain_db + Self.exportPreGainDB) / 20))
+        if let c = Self.exportCeilingDB { limiter.auAudioUnit.parameterTree?.parameter(withAddress: 0)?.value = AUValue(max(0, min(1, (c + 12) / 12))) }
         // mezclador → efectos del master → limitador → salida
         let fmt = engine.mainMixerNode.outputFormat(forBus: 0)
         engine.attach(limiter)
@@ -174,18 +228,20 @@ final class MixGraph {
         }
         engine.connect(last, to: limiter, format: fmt)
         engine.connect(limiter, to: engine.outputNode, format: fmt)
-        return chains.count
+        return chains.count + pending.count
     }
 
     /// Programa los segmentos. El tiempo de cada reproductor cuenta segundos de audio consumido:
     /// antes de que entre la pista, corre a la velocidad de su entrada (se mantiene fija hasta
     /// entonces); después, los segmentos van seguidos.
-    func schedule(from: Double) {
-        for c in chains {
+    func schedule(from: Double) { for c in chains { scheduleChain(c, from: from) } }
+
+    private func scheduleChain(_ c: Chain, from: Double) {
+        do {
             let sr = c.file.processingFormat.sampleRate
             let item = c.item
             let segs = item.segments.sorted { $0.mixStart < $1.mixStart }
-            guard let first = segs.first else { continue }
+            guard let first = segs.first else { return }
             let started = from >= item.mixStart
             let accNow = started ? item.toSource(from) : first.acc
             let idle = started ? 0 : (item.mixStart - from) * (c.pitch == nil ? 1 : item.rate(at: item.mixStart))
@@ -214,6 +270,7 @@ final class MixGraph {
     func start(at time: AVAudioTime?) { for c in chains { c.player.play(at: time) } }
 
     func teardown() {
+        pending.removeAll()
         for c in chains {
             c.player.stop()
             for n in [c.player, c.pitch, c.eq, c.gain].compactMap({ $0 as AVAudioNode? }) { engine.disconnectNodeOutput(n); engine.detach(n) }
@@ -357,6 +414,11 @@ final class Player {
             if buf.format.channelCount > 1 { for i in 0..<n { r = max(r, abs(ch[1][i])) } } else { r = l }
             self.peakL = max(l, self.peakL * 0.85)
             self.peakR = max(r, self.peakR * 0.85)
+            // Sonoridad en directo (EBU R128, a corto plazo) para el medidor LUFS.
+            self.loudLock.lock()
+            if self.loud == nil { self.loud = mmn_loud_new(buf.format.sampleRate, Int32(buf.format.channelCount)) }
+            mmn_loud_add(self.loud, ch[0], buf.format.channelCount > 1 ? ch[1] : nil, Int32(n))
+            self.loudLock.unlock()
         }
         setDevice()
         // Estabilidad: si cambia el dispositivo de salida (se desenchufa, cambia la frecuencia de
@@ -388,12 +450,80 @@ final class Player {
 
     func toggle(from t: Double? = nil) { isPlaying ? pause() : play(from: t ?? pausedAt) }
 
+    /// En directo, montar solo las pistas cercanas al cursor (--nolazy: todas, como antes).
+    static var lazy = !CommandLine.arguments.contains("--nolazy")
+    var chainCount: Int { graph?.chainCount ?? 0 }
+
+    // MARK: Medidor de sonoridad
+
+    private let loudLock = NSLock()
+    private var loud: OpaquePointer?
+    /// Sonoridad a corto plazo (3 s) de lo que suena, en LUFS (−inf si no suena nada).
+    var shortTermLUFS: Double {
+        loudLock.lock(); defer { loudLock.unlock() }
+        return loud.map { mmn_loud_shortterm($0) } ?? -.infinity
+    }
+    private func resetLoudness() {
+        loudLock.lock(); if let l = loud { mmn_loud_free(l) }; loud = nil; loudLock.unlock()
+    }
+
+    // MARK: Grabar la sesión (Playback › Record Mix…)
+
+    /// Graba lo que sale por la salida principal (tras el limitador) mientras suena, aunque se
+    /// pare, se mueva el cursor o se cambie la lista: todo va seguido al mismo fichero.
+    private(set) var recordURL: URL?
+    private var recordFile: AVAudioFile?
+    private let recordLock = NSLock()
+    private(set) var recordedFrames: AVAudioFramePosition = 0
+    private var tapped: AVAudioNode?
+    var isRecording: Bool { recordURL != nil }
+    private var recordRate = 44100.0
+    var recordedSeconds: Double { Double(recordedFrames) / recordRate }
+
+    func startRecording(to url: URL) {
+        recordURL = url
+        recordedFrames = 0
+        recordFile = nil
+        if let g = graph { installRecordTap(g) }
+        Log.write("grabación: \(url.path)")
+        NotificationCenter.default.post(name: .playerState, object: nil)
+    }
+    func stopRecording() {
+        removeRecordTap()
+        recordLock.lock(); recordFile = nil; recordLock.unlock()
+        Log.write(String(format: "grabación terminada: %.1f s", recordedSeconds))
+        recordURL = nil
+        NotificationCenter.default.post(name: .playerState, object: nil)
+    }
+    private func installRecordTap(_ g: MixGraph) {
+        guard let url = recordURL else { return }
+        let node = g.outputTapNode
+        let fmt = node.outputFormat(forBus: 0)
+        recordRate = fmt.sampleRate
+        recordLock.lock()
+        if recordFile == nil {
+            let settings: [String: Any] = [AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: fmt.sampleRate, AVNumberOfChannelsKey: fmt.channelCount,
+                                           AVLinearPCMBitDepthKey: 24, AVLinearPCMIsBigEndianKey: false, AVLinearPCMIsFloatKey: false]
+            recordFile = try? AVAudioFile(forWriting: url, settings: settings, commonFormat: .pcmFormatFloat32, interleaved: false)
+        }
+        recordLock.unlock()
+        node.installTap(onBus: 0, bufferSize: 4096, format: fmt) { [weak self] buf, _ in
+            guard let self else { return }
+            self.recordLock.lock(); defer { self.recordLock.unlock() }
+            guard let f = self.recordFile, f.processingFormat.sampleRate == buf.format.sampleRate else { return }
+            try? f.write(from: buf)
+            self.recordedFrames += AVAudioFramePosition(buf.frameLength)
+        }
+        tapped = node
+    }
+    private func removeRecordTap() { tapped?.removeTap(onBus: 0); tapped = nil }
+
     func play(from t: Double) {
         stopNodes()
         let s = Session.shared
         let from = max(0, min(t, max(0, s.layout.total - 0.05)))
         let g = MixGraph(engine: engine, layout: s.layout, doc: s.doc) { e, t in FxPool.shared.node(for: e, type: t) }
-        let n = g.build(from: from) { s.audioPath($0) }
+        let n = g.build(from: from, audioPath: { s.audioPath($0) }, horizon: Self.lazy ? 30 : nil)
         Log.write("play desde \(String(format: "%.2f", from)) s: \(n) pistas con audio de \(s.layout.items.count)")
         guard n > 0 else { pausedAt = from; return }
         setDevice()
@@ -403,6 +533,8 @@ final class Player {
         g.update(at: from)
         let host = mach_absolute_time() + UInt64(0.08 / Self.ticksToSeconds)
         g.start(at: AVAudioTime(hostTime: host))
+        resetLoudness()
+        if isRecording { installRecordTap(g) }
         graph = g
         startHost = host
         startMix = from
@@ -435,6 +567,7 @@ final class Player {
     }
 
     private func stopNodes() {
+        removeRecordTap()
         timer?.invalidate(); timer = nil
         // El motor se para siempre (y antes de desmontar el grafo): con el motor en marcha no se
         // puede desconectar el limitador, y los reproductores recién conectados no arrancan.
@@ -455,6 +588,12 @@ final class Player {
         let p = position
         if p >= Session.shared.layout.total + 0.5 { Log.write("fin de la mezcla"); stop(); return }
         graph?.update(at: p)
+        if Self.lazy {
+            graph?.extend(at: p) {
+                let host = mach_absolute_time() + UInt64(0.05 / Self.ticksToSeconds)
+                return (self.startMix + Double(host - self.startHost) * Self.ticksToSeconds, AVAudioTime(hostTime: host))
+            }
+        }
         NotificationCenter.default.post(name: .playerTick, object: nil)
     }
 

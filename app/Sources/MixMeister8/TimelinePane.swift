@@ -139,14 +139,15 @@ final class TimelinePane: NSView {
         let cur = min(timeline.playhead, total)
         let idx = s.layout.items.last { !$0.overlay && $0.mixStart <= cur }.map { $0.index + 1 } ?? (s.doc.tracks.isEmpty ? 0 : 1)
         func hms(_ t: Double) -> String { String(format: "%02d:%02d:%02d", Int(t) / 3600, Int(t) / 60 % 60, Int(t) % 60) }
-        status.stringValue = "CURRENT \(hms(cur))(\(idx))   REMAINING \(hms(max(0, total - cur)))   TOTAL \(hms(total))(\(s.doc.tracks.count))"
+        let rec = Player.shared.isRecording ? "   ● REC \(hms(Player.shared.recordedSeconds))" : ""
+        status.stringValue = "CURRENT \(hms(cur))(\(idx))   REMAINING \(hms(max(0, total - cur)))   TOTAL \(hms(total))(\(s.doc.tracks.count))" + rec
     }
 
     /// Sigue a la reproducción: cursor, contadores, medidores y desplazamiento de la vista.
     @objc private func playerTick() {
         let p = Player.shared
         timeline.playhead = p.position
-        meters.left = p.peakL; meters.right = p.peakR; meters.needsDisplay = true
+        meters.left = p.peakL; meters.right = p.peakR; meters.lufs = p.isPlaying ? p.shortTermLUFS : -.infinity; meters.needsDisplay = true
         updateStatus()
         showTempo()
         if p.isPlaying {
@@ -207,11 +208,18 @@ final class StripControls: FillView {
 /// Medidores de salida L/R (se mueven con la reproducción).
 final class MeterView: FillView {
     var left: Float = 0, right: Float = 0
+    /// Sonoridad a corto plazo (LUFS), debajo de los medidores (nuevo en MixMeister 8).
+    var lufs: Double = -.infinity
     init() { super.init(Theme.panelRaised) }
     required init?(coder: NSCoder) { fatalError() }
     override func draw(_ r: NSRect) {
         super.draw(r)
-        let h = bounds.height - 30
+        let h = bounds.height - 40
+        let a: [NSAttributedString.Key: Any] = [.font: Theme.mono(9, .semibold), .foregroundColor: lufs > -9 ? Theme.bass : Theme.text]
+        let txt = lufs.isFinite && lufs > -70 ? String(format: "%.1f", lufs) : "—"
+        let sz = (txt as NSString).size(withAttributes: a)
+        (txt as NSString).draw(at: NSPoint(x: (bounds.width - sz.width) / 2, y: bounds.height - 26), withAttributes: a)
+        ("LUFS" as NSString).draw(at: NSPoint(x: 9, y: bounds.height - 14), withAttributes: [.font: Theme.font(7.5, .semibold), .foregroundColor: Theme.textDim])
         for (i, v) in [left, right].enumerated() {
             let bar = NSRect(x: 10 + CGFloat(i) * 14, y: 10, width: 9, height: h)
             Theme.background.setFill(); bar.fill()
