@@ -46,6 +46,11 @@ struct Fx {
     // fuzz-wah, filter gate
     Svf svf[2];
     double gate = 1;
+    // ganancia sin escalones y limitador
+    double gain = -1;               // -1 = sin iniciar
+    double lim_gain = 1, lim_target = 1;
+    int lim_hold = 0;
+    std::size_t lim_len = 0;
 };
 
 int count(int kind) {
@@ -55,22 +60,72 @@ int count(int kind) {
     case MMN_FX_FUZZWAH: return 6;
     case MMN_FX_FILTERGATE: return 6;
     case MMN_FX_STEREOIZER: return 3;
+    case MMN_FX_GAIN: return 1;
+    case MMN_FX_LIMITER: return 2;
     default: return 0;
     }
 }
 
-const float kDefaults[6][8] = {
+const float kDefaults[8][8] = {
     {},
     {0.35f, 0.6f, 0.6f, 0.5f},                 // flanger: rate, depth, feedback(0.5 = 0), mix
     {0.3f, 0.7f, 0.5f, 0.4f, 0.5f},            // phaser: rate, depth, feedback, stages, mix
     {0.4f, 0.4f, 0.5f, 0.35f, 0.7f, 1.0f},     // fuzz-wah: drive, freq, reso, lfo rate, lfo depth, mix
     {0.55f, 0.3f, 0.0f, 0.5f, 0.0f, 1.0f},     // filter gate: cutoff, reso, type, rate, depth, mix
     {0.5f, 0.2f, 1.0f},                        // stereoizer: width (0.5 = 100 %), haas, mix
+    {0.25f},                                   // ganancia: 0.25 = ×1 (0 dB)
+    {0.975f, 0.5f},                            // limitador: umbral (−0,3 dBFS), release (100 ms)
 };
+
+/// Ganancia sin escalones: sigue al valor pedido muestra a muestra (constante de 3 ms). A 0 dB
+/// estable no toca el audio (el resultado es idéntico bit a bit).
+void process_gain(Fx& f, float* io[2], int nc, int n) {
+    const double target = 4.0 * f.p[0];
+    if (f.gain < 0) f.gain = target;
+    if (f.gain == target && target == 1.0) return;
+    const double a = 1 - std::exp(-1.0 / (0.003 * f.sr));
+    for (int i = 0; i < n; ++i) {
+        f.gain += (target - f.gain) * a;
+        if (std::fabs(f.gain - target) < 1e-7) f.gain = target;
+        for (int c = 0; c < nc; ++c) io[c][i] = static_cast<float>(io[c][i] * f.gain);
+    }
+}
+
+/// Limitador del master con anticipación (1,5 ms): por debajo del umbral deja pasar el audio sin
+/// tocarlo (solo retrasado); por encima baja la ganancia antes de que llegue el pico.
+void process_limiter(Fx& f, float* io[2], int nc, int n) {
+    const double thr = std::pow(10, lin(f.p[0], -12, 0) / 20);
+    const double rel = 1 - std::exp(-1.0 / (expmap(f.p[1], 0.02, 0.5) * f.sr));
+    const std::size_t L = f.lim_len, B = f.buf[0].size();
+    const double att = 1 - std::exp(-5.0 / static_cast<double>(L));
+    for (int i = 0; i < n; ++i) {
+        double peak = 0;
+        for (int c = 0; c < nc; ++c) peak = std::max(peak, static_cast<double>(std::fabs(io[c][i])));
+        const double req = peak > thr ? thr / peak : 1.0;
+        if (req < f.lim_target) { f.lim_target = req; f.lim_hold = static_cast<int>(L); }
+        else if (f.lim_hold > 0) --f.lim_hold;
+        else if (f.lim_target < 1) { f.lim_target += (1 - f.lim_target) * rel; if (f.lim_target > 1 - 1e-6) f.lim_target = 1; }
+        if (f.lim_target < f.lim_gain) f.lim_gain += (f.lim_target - f.lim_gain) * att;
+        else f.lim_gain = f.lim_target;
+        const std::size_t rp = (f.w + B - L) % B;
+        for (int c = 0; c < nc; ++c) {
+            f.buf[c][f.w] = io[c][i];
+            const float d = f.buf[c][rp];
+            if (f.lim_gain == 1.0) io[c][i] = d;
+            else {
+                const double y = d * f.lim_gain;
+                io[c][i] = static_cast<float>(std::clamp(y, -thr, thr));
+            }
+        }
+        f.w = (f.w + 1) % B;
+    }
+}
 
 void process(Fx& f, float* l, float* r, int n) {
     float* io[2] = {l, r ? r : l};
     const int nc = r ? 2 : 1;
+    if (f.kind == MMN_FX_GAIN) { process_gain(f, io, nc, n); return; }
+    if (f.kind == MMN_FX_LIMITER) { process_limiter(f, io, nc, n); return; }
     // Suavizado de parámetros por bloque (evita chasquidos al automatizar).
     const double a = 1 - std::exp(-static_cast<double>(n) / (0.02 * f.sr));
     for (int i = 0; i < 8; ++i) f.s[i] += (f.p[i] - f.s[i]) * a;
@@ -198,7 +253,7 @@ extern "C" {
 int mmn_fx_param_count(int kind) { return count(kind); }
 
 float mmn_fx_param_default(int kind, int param) {
-    if (kind < 1 || kind > 5 || param < 0 || param >= 8) return 0;
+    if (kind < 1 || kind > 7 || param < 0 || param >= 8) return 0;
     return kDefaults[kind][param];
 }
 
@@ -212,6 +267,7 @@ mmn_fx* mmn_fx_new(int kind, double sample_rate, int channels) {
     const std::size_t len = static_cast<std::size_t>(x->f.sr * 0.05) + 4;
     x->f.buf[0].assign(len, 0.f);
     x->f.buf[1].assign(len, 0.f);
+    x->f.lim_len = static_cast<std::size_t>(x->f.sr * 0.0015);
     return x;
 }
 
@@ -236,7 +292,12 @@ void mmn_fx_reset(mmn_fx* x) {
     for (auto& a : f.ap) for (double& v : a) v = 0;
     f.svf[0] = f.svf[1] = Svf{};
     f.gate = 1;
+    f.gain = -1;
+    f.lim_gain = f.lim_target = 1;
+    f.lim_hold = 0;
 }
+
+int mmn_fx_latency(mmn_fx* x) { return x && x->f.kind == MMN_FX_LIMITER ? static_cast<int>(x->f.lim_len) : 0; }
 
 void mmn_fx_process(mmn_fx* x, float* left, float* right, int frames) {
     if (x && left && frames > 0) process(x->f, left, right, frames);

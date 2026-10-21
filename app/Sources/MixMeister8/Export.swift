@@ -9,21 +9,23 @@ import UniformTypeIdentifiers
 /// tiempo real), por bloques de 1024 muestras: en cada bloque se aplican volumen, EQ y tempo.
 enum Exporter {
     enum Kind: Int, CaseIterable {
-        case aiff, wav, aac
-        var title: String { ["AIFF", "WAV", "AAC (M4A)"][rawValue] }
-        var ext: String { ["aif", "wav", "m4a"][rawValue] }
+        case aiff, wav, aac, aiff24, wav24
+        var title: String { ["AIFF (16 bits)", "WAV (16 bits)", "AAC (M4A)", "AIFF (24 bits)", "WAV (24 bits)"][rawValue] }
+        var ext: String { ["aif", "wav", "m4a", "aif", "wav"][rawValue] }
+        /// 16 bits: se escribe con dither TPDF (sin él, el redondeo distorsiona los pasajes suaves).
+        var is16: Bool { self == .aiff || self == .wav }
         var settings: [String: Any] {
             switch self {
-            case .aiff: return [AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: 44100, AVNumberOfChannelsKey: 2,
-                                AVLinearPCMBitDepthKey: 16, AVLinearPCMIsBigEndianKey: true, AVLinearPCMIsFloatKey: false]
-            case .wav: return [AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: 44100, AVNumberOfChannelsKey: 2,
-                               AVLinearPCMBitDepthKey: 16, AVLinearPCMIsBigEndianKey: false, AVLinearPCMIsFloatKey: false]
+            case .aiff, .aiff24: return [AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: 44100, AVNumberOfChannelsKey: 2,
+                                AVLinearPCMBitDepthKey: self == .aiff ? 16 : 24, AVLinearPCMIsBigEndianKey: true, AVLinearPCMIsFloatKey: false]
+            case .wav, .wav24: return [AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: 44100, AVNumberOfChannelsKey: 2,
+                               AVLinearPCMBitDepthKey: self == .wav ? 16 : 24, AVLinearPCMIsBigEndianKey: false, AVLinearPCMIsFloatKey: false]
             case .aac: return [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 44100, AVNumberOfChannelsKey: 2,
                                AVEncoderBitRateKey: 256_000]
             }
         }
         /// Espacio aproximado por minuto (como «Estimated Disk Space Required» del original).
-        var bytesPerMinute: Double { self == .aac ? 1.9e6 : 10.6e6 }
+        var bytesPerMinute: Double { self == .aac ? 1.9e6 : (is16 ? 10.6e6 : 15.9e6) }
     }
     enum Split: Int { case none, songs, labels }
 
@@ -45,30 +47,136 @@ enum Exporter {
     }
 
     /// Renderiza la mezcla. `sink` recibe cada bloque (estéreo, float) y el instante de la mezcla.
-    static func render(layout: MixLayout, doc: PLDocument, audioPath: (Int) -> String?,
+    ///
+    /// Velocidad: el render sin conexión de AVAudioEngine usa un solo núcleo. En paralelo, cada
+    /// pista se renderiza entera en su propio motor (reproductor → tempo → EQ → volumen → efectos de
+    /// la pista, exactamente como en el render seguido, sin cortarla nunca) y una pasada final las
+    /// suma y aplica los efectos del master y el limitador. `parallel: false` = como antes.
+    static var parallelDefault = !CommandLine.arguments.contains("--serial")
+    static func render(layout: MixLayout, doc: PLDocument, audioPath: @escaping (Int) -> String?, parallel: Bool = parallelDefault,
                        progress: (Double) -> Bool, sink: (AVAudioPCMBuffer, Double) throws -> Void) throws {
+        let total = AVAudioFramePosition((layout.total + 0.5) * sampleRate)
+        let items = layout.items.filter { !$0.segments.isEmpty && $0.index < doc.tracks.count && audioPath($0.index) != nil }
+        if !parallel || items.count < 2 {
+            try renderRange(layout: layout, doc: doc, audioPath: audioPath, from: 0, to: total, preroll: 0,
+                            progress: { progress(Double($0) / Double(total)) }, sink: sink)
+            return
+        }
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("mm8-render-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let fmt = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2)!
+        let lock = NSLock()
+        // Cada pista: desde justo antes de que entre hasta 6 s después de acabar (colas de efectos).
+        struct Stem { let item: MixLayout.Item; let from: AVAudioFramePosition; let to: AVAudioFramePosition; let url: URL }
+        let stems = items.map { it -> Stem in
+            let a = max(0, AVAudioFramePosition((it.mixStart - 0.05) * sampleRate))
+            let b = min(total, AVAudioFramePosition((it.mixEnd + 6) * sampleRate))
+            return Stem(item: it, from: a, to: max(a + 1, b), url: tmp.appendingPathComponent("\(it.index).caf"))
+        }
+        let work = Double(stems.reduce(0) { $0 + $1.to - $1.from })
+        var done = [AVAudioFramePosition](repeating: 0, count: stems.count)
+        var errors: [Error] = []
+        var cancelled = false
+        let group = DispatchGroup()
+        group.enter()
+        DispatchQueue.global(qos: .userInitiated).async {
+            // Las más largas primero, para que no quede una sola al final.
+            let order = stems.indices.sorted { stems[$0].to - stems[$0].from > stems[$1].to - stems[$1].from }
+            DispatchQueue.concurrentPerform(iterations: order.count) { k in
+                let i = order[k], st = stems[i]
+                do {
+                    let f = try AVAudioFile(forWriting: st.url, settings: fmt.settings, commonFormat: .pcmFormatFloat32, interleaved: false)
+                    try renderRange(layout: layout, doc: doc, audioPath: audioPath, from: st.from, to: st.to, preroll: 0,
+                                    only: st.item.index, master: false, progress: { n in
+                        lock.lock(); defer { lock.unlock() }
+                        done[i] = n
+                        return !cancelled
+                    }) { buf, _ in try f.write(from: buf) }
+                } catch { lock.lock(); errors.append(error); cancelled = true; lock.unlock() }
+            }
+            group.leave()
+        }
+        while group.wait(timeout: .now() + 0.2) == .timedOut {
+            lock.lock(); let frac = Double(done.reduce(0, +)) / work; lock.unlock()
+            if !progress(0.8 * frac) { lock.lock(); cancelled = true; lock.unlock() }
+        }
+        if cancelled && errors.isEmpty { throw EngineError.message("Cancelado") }
+        if let e = errors.first { throw e }
+
+        // Pasada final: las pistas renderizadas, cada una en su muestra de inicio → mezclador →
+        // efectos del master → limitador.
+        let engine = AVAudioEngine()
+        try engine.enableManualRenderingMode(.offline, format: fmt, maximumFrameCount: 1024)
+        let g = MixGraph(engine: engine, layout: layout, doc: doc, only: -1, master: true)
+        var players: [(AVAudioPlayerNode, AVAudioFile, AVAudioFramePosition)] = []
+        for st in stems {
+            let f = try AVAudioFile(forReading: st.url, commonFormat: .pcmFormatFloat32, interleaved: false)
+            let p = AVAudioPlayerNode()
+            engine.attach(p)
+            engine.connect(p, to: engine.mainMixerNode, format: f.processingFormat)
+            players.append((p, f, st.from))
+        }
+        g.build(from: 0, audioPath: audioPath)
+        for (p, f, at) in players { p.scheduleFile(f, at: AVAudioTime(sampleTime: at, atRate: sampleRate)) }
+        try engine.start()
+        for (p, _, _) in players { p.play(at: nil) }
+        defer {
+            engine.stop()
+            for (p, _, _) in players { engine.disconnectNodeOutput(p); engine.detach(p) }
+            g.teardown()
+        }
+        let buf = AVAudioPCMBuffer(pcmFormat: engine.manualRenderingFormat, frameCapacity: 1024)!
+        let lat = AVAudioFramePosition(g.latencyFrames), end = total + lat
+        var k: AVAudioFramePosition = 0
+        while k < end {
+            let st = try engine.renderOffline(AVAudioFrameCount(min(1024, end - k)), to: buf)
+            guard st == .success else { if st == .error { throw EngineError.message("error al renderizar") }; continue }
+            let got = AVAudioFramePosition(buf.frameLength)
+            if k + got > lat {
+                let skip = AVAudioFrameCount(max(0, lat - k))
+                try sink(skip > 0 ? slice(buf, skip, buf.frameLength - skip) : buf, Double(max(0, k - lat)) / sampleRate)
+            }
+            k += got
+            if k % (1024 * 200) < 1024, !progress(0.8 + 0.2 * Double(k) / Double(end)) { throw EngineError.message("Cancelado") }
+        }
+    }
+
+    /// Renderiza las muestras [from, to) de la mezcla con un motor propio. Empieza `preroll` antes
+    /// (y descuenta el retardo del limitador) para que lo entregado sea igual que en un render seguido.
+    private static func renderRange(layout: MixLayout, doc: PLDocument, audioPath: (Int) -> String?,
+                                    from: AVAudioFramePosition, to: AVAudioFramePosition, preroll: AVAudioFramePosition,
+                                    only: Int? = nil, master: Bool = true,
+                                    progress: (AVAudioFramePosition) -> Bool, sink: (AVAudioPCMBuffer, Double) throws -> Void) throws {
         let engine = AVAudioEngine()
         let fmt = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2)!
         try engine.enableManualRenderingMode(.offline, format: fmt, maximumFrameCount: 1024)
-        let g = MixGraph(engine: engine, layout: layout, doc: doc)
-        guard g.build(from: 0, audioPath: audioPath) > 0 else { throw EngineError.message("No se encuentra el audio de ninguna pista.") }
-        g.schedule(from: 0)
-        g.update(at: 0)
+        let start = max(0, from - preroll)
+        let t0 = Double(start) / sampleRate
+        let g = MixGraph(engine: engine, layout: layout, doc: doc, only: only, master: master)
+        guard g.build(from: t0, audioPath: audioPath) > 0 || from > 0 || only != nil else { throw EngineError.message("No se encuentra el audio de ninguna pista.") }
+        g.schedule(from: t0)
+        g.update(at: t0)
         try engine.start()
         g.start(at: nil)
         defer { engine.stop(); g.teardown() }   // primero parar: con el motor en marcha no se puede desmontar
         let buf = AVAudioPCMBuffer(pcmFormat: engine.manualRenderingFormat, frameCapacity: 1024)!
-        let totalFrames = AVAudioFramePosition((layout.total + 0.5) * sampleRate)
-        var done: AVAudioFramePosition = 0
-        while done < totalFrames {
-            let t = Double(done) / sampleRate
-            g.update(at: t)
-            let n = AVAudioFrameCount(min(1024, totalFrames - done))
-            let st = try engine.renderOffline(n, to: buf)
+        // Muestra k del render = instante start + (k − lat) de la mezcla.
+        let lat = AVAudioFramePosition(g.latencyFrames)
+        let skipTo = (from - start) + lat, end = (to - start) + lat
+        var k: AVAudioFramePosition = 0
+        while k < end {
+            g.update(at: t0 + Double(k) / sampleRate)
+            let want = AVAudioFrameCount(min(1024, end - k))
+            let st = try engine.renderOffline(want, to: buf)
             guard st == .success else { if st == .error { throw EngineError.message("error al renderizar") }; continue }
-            try sink(buf, t)
-            done += AVAudioFramePosition(buf.frameLength)
-            if !progress(Double(done) / Double(totalFrames)) { throw EngineError.message("Cancelado") }
+            let got = AVAudioFramePosition(buf.frameLength)
+            if k + got > skipTo {
+                let skip = AVAudioFrameCount(max(0, skipTo - k))
+                try sink(skip > 0 ? slice(buf, skip, buf.frameLength - skip) : buf, Double(from + max(0, k - skipTo)) / sampleRate)
+            }
+            k += got
+            if !progress(max(0, k - skipTo)) { throw EngineError.message("Cancelado") }
         }
     }
 
@@ -86,11 +194,13 @@ enum Exporter {
             let name = cuts.count > 1 ? String(format: "%@ %02d.%@", stem, i, kind.ext) : "\(stem).\(kind.ext)"
             let u = dir.appendingPathComponent(name)
             try? FileManager.default.removeItem(at: u)
-            file = try AVAudioFile(forWriting: u, settings: kind.settings, commonFormat: .pcmFormatFloat32, interleaved: false)
+            file = try AVAudioFile(forWriting: u, settings: kind.settings, commonFormat: kind.is16 ? .pcmFormatInt16 : .pcmFormatFloat32, interleaved: false)
             urls.append(u)
         }
         try open(1)
-        try render(layout: layout, doc: doc, audioPath: { s.audioPath($0) }, progress: progress) { buf, t in
+        var dither = Dither()
+        try render(layout: layout, doc: doc, audioPath: { s.audioPath($0) }, progress: progress) { fbuf, t in
+            let buf = kind.is16 ? dither.toInt16(fbuf) : fbuf
             // ¿Hay un corte dentro de este bloque?
             let len = Double(buf.frameLength) / sampleRate
             if next < cuts.count, cuts[next] < t + len {
@@ -111,7 +221,11 @@ enum Exporter {
         let out = AVAudioPCMBuffer(pcmFormat: b.format, frameCapacity: count)!
         out.frameLength = count
         for c in 0..<Int(b.format.channelCount) {
-            memcpy(out.floatChannelData![c], b.floatChannelData![c] + Int(from), Int(count) * MemoryLayout<Float>.size)
+            if let f = b.floatChannelData, let o = out.floatChannelData {
+                memcpy(o[c], f[c] + Int(from), Int(count) * MemoryLayout<Float>.size)
+            } else if let f = b.int16ChannelData, let o = out.int16ChannelData {
+                memcpy(o[c], f[c] + Int(from), Int(count) * MemoryLayout<Int16>.size)
+            }
         }
         return out
     }
@@ -127,13 +241,14 @@ enum Exporter {
         let h = try FileHandle(forWritingTo: bin)
         defer { try? h.close() }
         var pcm = [Int16]()
+        var dither = Dither()
         try render(layout: layout, doc: doc, audioPath: { s.audioPath($0) }, progress: progress) { buf, _ in
             let n = Int(buf.frameLength)
             pcm.removeAll(keepingCapacity: true)
             let l = buf.floatChannelData![0], r = buf.floatChannelData![1]
             for i in 0..<n {
-                pcm.append(Int16(max(-1, min(1, l[i])) * 32767).littleEndian)
-                pcm.append(Int16(max(-1, min(1, r[i])) * 32767).littleEndian)
+                pcm.append(dither.sample(l[i]).littleEndian)
+                pcm.append(dither.sample(r[i]).littleEndian)
             }
             pcm.withUnsafeBytes { h.write(Data($0)) }
         }
@@ -351,4 +466,26 @@ final class NSMatrixLike: NSObject {
         }
     }
     @objc private func pick(_ s: NSButton) { for b in buttons { b.state = b === s ? .on : .off } }
+}
+
+/// Paso a 16 bits con dither TPDF (±1 LSB, ruido triangular) y redondeo: el error de cuantización
+/// queda como ruido blanco a −96 dB en lugar de distorsión ligada a la señal.
+struct Dither {
+    private var state: UInt64 = 0x9E37_79B9_7F4A_7C15
+    private mutating func rand() -> Float {
+        state ^= state << 13; state ^= state >> 7; state ^= state << 17
+        return Float(state >> 40) / Float(1 << 24)       // 0..1
+    }
+    mutating func sample(_ x: Float) -> Int16 {
+        let v = max(-1, min(1, x)) * 32767 + (rand() - rand())
+        return Int16(max(-32768, min(32767, v.rounded())))
+    }
+    mutating func toInt16(_ b: AVAudioPCMBuffer) -> AVAudioPCMBuffer {
+        let fmt = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: b.format.sampleRate, channels: b.format.channelCount, interleaved: false)!
+        let out = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: b.frameLength)!
+        out.frameLength = b.frameLength
+        guard let src = b.floatChannelData, let dst = out.int16ChannelData else { return out }
+        for c in 0..<Int(b.format.channelCount) { for i in 0..<Int(b.frameLength) { dst[c][i] = sample(src[c][i]) } }
+        return out
+    }
 }

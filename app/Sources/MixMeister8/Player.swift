@@ -1,6 +1,7 @@
 import AVFoundation
 import AppKit
 import AudioToolbox
+import MMNEngine
 
 extension Notification.Name {
     static let playerTick = Notification.Name("mm8.playerTick")
@@ -20,21 +21,44 @@ enum Log {
     }
 }
 
-/// La mezcla como grafo de audio: por pista, reproductor → cambio de tempo sin cambio de tono →
-/// ecualizador de 3 bandas → mezclador. Lo usan igual la reproducción en directo y la exportación
-/// (fichero o CD), así que lo que se exporta es exactamente lo que se oye.
+/// La mezcla como grafo de audio: por pista, reproductor → [cambio de tempo sin cambio de tono] →
+/// [ecualizador de 3 bandas] → ganancia sin escalones → efectos → mezclador → efectos del master →
+/// limitador → salida. Lo usan igual la reproducción en directo y la exportación (fichero o CD), así
+/// que lo que se exporta es exactamente lo que se oye.
+///
+/// Calidad: una pista que suena a su tempo y en su tono no pasa por el cambio de tempo, y sin
+/// marcadores de EQ no pasa por el ecualizador; a 0 dB la ganancia no la toca y el limitador solo
+/// actúa por encima de −0,3 dBFS: la pista llega a la salida idéntica bit a bit.
 final class MixGraph {
     struct Chain {
         let index: Int
         let player = AVAudioPlayerNode()
-        let pitch = AVAudioUnitTimePitch()
-        let eq = AVAudioUnitEQ(numberOfBands: 3)
+        var pitch: AVAudioUnitTimePitch?          // solo si la pista cambia de tempo o de tono
+        var eq: AVAudioUnitEQ?                     // solo si tiene marcadores de EQ
+        var gain: AVAudioUnitEffect?               // volumen sin escalones (DSP del motor)
+        var gainParam: AUParameter?
         let file: AVAudioFile
         let item: MixLayout.Item
         let volume: [(t: Double, db: Double)]      // por posición en el audio (s)
         let bass: [(t: Double, db: Double)], mid: [(t: Double, db: Double)], treble: [(t: Double, db: Double)]
         var fx: [FxSlot] = []
+        let sync = Sync()
     }
+    /// Sincronía del cambio de tempo. AUNewTimePitch avanza por saltos de entrada enteros de
+    /// 4096/overlap muestras, así que la velocidad real es round(H·v)/H y una pista con el tempo
+    /// cambiado se iba desplazando (medido: 0,98 → +0,047 %, 1,0417 → −0,063 %, 1,10 → −0,036 %;
+    /// hasta 150 ms en 5 minutos). Se lleva la cuenta del audio que consume de verdad (con ese
+    /// modelo) frente a donde debe ir, y en cada bloque se pide la velocidad que lo corrige: alterna
+    /// entre los dos saltos vecinos y el desfase queda por debajo de un salto (~3 ms).
+    final class Sync { var from = 0.0, idle = 0.0, accNow = 0.0, idleRate = 1.0, consumed = 0.0, lastMix = Double.nan, lastRate = 1.0, hop = 256.0 }
+    static var servo = !CommandLine.arguments.contains("--noservo")
+    private func expected(_ c: Chain, at t: Double) -> Double {
+        let s = c.sync, item = c.item
+        if t >= item.mixStart { return s.idle + (item.toSource(t) - s.accNow) }
+        return max(0, s.idle - (item.mixStart - t) * s.idleRate)
+    }
+    /// Velocidad real de AUNewTimePitch para una velocidad pedida.
+    static func effectiveRate(_ r: Double, hop: Double) -> Double { (r * hop).rounded() / hop }
     /// Un efecto conectado: su nodo y su automatización (marcadores 0x08000000 de la pista).
     final class FxSlot {
         let slot: UInt32
@@ -48,10 +72,14 @@ final class MixGraph {
     }
     let engine: AVAudioEngine
     private(set) var chains: [Chain] = []
-    /// Limitador del master (Apple Peak Limiter, −1 dB): evita que los solapes saturen.
-    private let limiter = AVAudioUnitEffect(audioComponentDescription: AudioComponentDescription(
-        componentType: kAudioUnitType_Effect, componentSubType: kAudioUnitSubType_PeakLimiter,
-        componentManufacturer: kAudioUnitManufacturer_Apple, componentFlags: 0, componentFlagsMask: 0))
+    /// Limitador del master (DSP del motor, con anticipación de 1,5 ms): por debajo de −0,3 dBFS no
+    /// toca el audio; evita que los solapes saturen.
+    private let limiter = AVAudioUnitEffect(audioComponentDescription: FxCatalog.dspDescription(MMN_FX_LIMITER))
+    /// Retardo del limitador en muestras (la exportación lo descuenta).
+    var latencyFrames: Int { master ? 66 : 0 }
+    /// Solo una pista (exportación en paralelo: una pista por motor) y sin la sección del master.
+    let only: Int?
+    let master: Bool
     let layout: MixLayout
     private(set) var doc: PLDocument
     private var masterFx: [FxSlot] = []
@@ -59,9 +87,10 @@ final class MixGraph {
     /// y el panel de control actúa sobre ellos); al exportar, nodos nuevos.
     let fxNode: (PLEffect, FxType) -> AVAudioUnitEffect?
 
-    init(engine: AVAudioEngine, layout: MixLayout, doc: PLDocument,
+    init(engine: AVAudioEngine, layout: MixLayout, doc: PLDocument, only: Int? = nil, master: Bool = true,
          fxNode: @escaping (PLEffect, FxType) -> AVAudioUnitEffect? = { _, t in FxHost.makeNode(t) }) {
         self.engine = engine; self.layout = layout; self.doc = doc; self.fxNode = fxNode
+        self.only = only; self.master = master
     }
 
     private func makeSlots(_ effects: [PLEffect]) -> [FxSlot] {
@@ -85,7 +114,7 @@ final class MixGraph {
     /// Crea las cadenas de las pistas que aún suenan después de `from`. Devuelve cuántas.
     @discardableResult
     func build(from: Double, audioPath: (Int) -> String?) -> Int {
-        for item in layout.items where item.mixEnd > from && !item.segments.isEmpty {
+        for item in layout.items where item.mixEnd > from && !item.segments.isEmpty && (only == nil || only == item.index) {
             guard item.index < doc.tracks.count, let path = audioPath(item.index),
                   let file = try? AVAudioFile(forReading: URL(fileURLWithPath: path)) else { continue }
             let t = doc.tracks[item.index]
@@ -97,27 +126,40 @@ final class MixGraph {
                           bass: env([MarkerKind.bass]), mid: env([MarkerKind.mid]), treble: env([MarkerKind.treble]))
             c.fx = makeSlots(t.effects)
             Self.automation(t, c.fx)
-            engine.attach(c.player); engine.attach(c.pitch); engine.attach(c.eq)
+            // ¿Suena siempre a su tempo y en su tono? Entonces no hace falta el cambio de tempo.
+            let constantRate = !item.overlay && t.markers(MarkerKind.tempo).isEmpty
+                && abs(MixLayout.ownTempo(t) - MixLayout.audioTempo(t)) < 1e-6 && t.key_semitones == 0
+            if !constantRate || Self.forceTimePitch {
+                let p = AVAudioUnitTimePitch()
+                p.pitch = Float(t.key_semitones * 100)      // Track Settings › Key Adjustment (cents)
+                p.overlap = Self.timePitchOverlap
+                c.pitch = p
+            }
+            if !(c.bass.isEmpty && c.mid.isEmpty && c.treble.isEmpty) {
+                let e = AVAudioUnitEQ(numberOfBands: 3)
+                let b = e.bands
+                b[0].filterType = .lowShelf; b[0].frequency = 120; b[0].bypass = false
+                b[1].filterType = .parametric; b[1].frequency = 1000; b[1].bandwidth = 1.5; b[1].bypass = false
+                b[2].filterType = .highShelf; b[2].frequency = 6000; b[2].bypass = false
+                for k in 0..<3 { b[k].gain = 0 }
+                c.eq = e
+            }
+            let g = AVAudioUnitEffect(audioComponentDescription: FxCatalog.dspDescription(MMN_FX_GAIN))
+            c.gain = g
+            c.gainParam = g.auAudioUnit.parameterTree?.parameter(withAddress: 0)
             let fmt = file.processingFormat
-            engine.connect(c.player, to: c.pitch, format: fmt)
-            engine.connect(c.pitch, to: c.eq, format: fmt)
-            // pista → efectos de la pista (en orden, de izquierda a derecha en el rack) → mezclador
-            var last: AVAudioNode = c.eq
-            for f in c.fx {
-                engine.attach(f.node)
-                engine.connect(last, to: f.node, format: fmt)
-                last = f.node
+            // reproductor → [tempo] → [EQ] → ganancia → efectos (de izquierda a derecha) → mezclador
+            var last: AVAudioNode = c.player
+            engine.attach(c.player)
+            for n in [c.pitch, c.eq, c.gain].compactMap({ $0 as AVAudioNode? }) + c.fx.map(\.node) {
+                engine.attach(n)
+                engine.connect(last, to: n, format: fmt)
+                last = n
             }
             engine.connect(last, to: engine.mainMixerNode, format: fmt)
-            c.pitch.pitch = Float(t.key_semitones * 100)      // Track Settings › Key Adjustment (cents)
-            c.pitch.overlap = 8
-            let b = c.eq.bands
-            b[0].filterType = .lowShelf; b[0].frequency = 120; b[0].bypass = false
-            b[1].filterType = .parametric; b[1].frequency = 1000; b[1].bandwidth = 1.5; b[1].bypass = false
-            b[2].filterType = .highShelf; b[2].frequency = 6000; b[2].bypass = false
-            for k in 0..<3 { b[k].gain = 0 }
             chains.append(c)
         }
+        guard master else { return chains.count }
         engine.mainMixerNode.outputVolume = Float(pow(10, doc.master_gain_db / 20))
         // mezclador → efectos del master → limitador → salida
         let fmt = engine.mainMixerNode.outputFormat(forBus: 0)
@@ -132,7 +174,6 @@ final class MixGraph {
         }
         engine.connect(last, to: limiter, format: fmt)
         engine.connect(limiter, to: engine.outputNode, format: fmt)
-        AudioUnitSetParameter(limiter.audioUnit, kLimiterParam_PreGain, kAudioUnitScope_Global, 0, -1.0, 0)
         return chains.count
     }
 
@@ -147,8 +188,13 @@ final class MixGraph {
             guard let first = segs.first else { continue }
             let started = from >= item.mixStart
             let accNow = started ? item.toSource(from) : first.acc
-            let idle = started ? 0 : (item.mixStart - from) * item.rate(at: item.mixStart)
-            c.pitch.rate = Float(max(1.0 / 32, min(32, item.rate(at: max(from, item.mixStart)))))
+            let idle = started ? 0 : (item.mixStart - from) * (c.pitch == nil ? 1 : item.rate(at: item.mixStart))
+            c.pitch?.rate = Float(max(1.0 / 32, min(32, item.rate(at: max(from, item.mixStart)))))
+            c.sync.from = from; c.sync.idle = idle; c.sync.accNow = accNow
+            c.sync.idleRate = c.pitch == nil ? 1 : item.rate(at: item.mixStart)
+            c.sync.consumed = 0; c.sync.lastMix = .nan
+            c.sync.lastRate = Double(c.pitch?.rate ?? 1)
+            c.sync.hop = 4096 / Double(max(1, c.pitch?.overlap ?? 16))
             for seg in segs where seg.mixEnd > from {
                 var startSrc = seg.srcStart
                 var playerTime = idle + (seg.acc - accNow)
@@ -170,8 +216,7 @@ final class MixGraph {
     func teardown() {
         for c in chains {
             c.player.stop()
-            engine.disconnectNodeOutput(c.player); engine.disconnectNodeOutput(c.pitch); engine.disconnectNodeOutput(c.eq)
-            engine.detach(c.player); engine.detach(c.pitch); engine.detach(c.eq)
+            for n in [c.player, c.pitch, c.eq, c.gain].compactMap({ $0 as AVAudioNode? }) { engine.disconnectNodeOutput(n); engine.detach(n) }
             for f in c.fx { engine.disconnectNodeOutput(f.node); engine.detach(f.node); f.node.reset() }
         }
         chains.removeAll()
@@ -185,6 +230,15 @@ final class MixGraph {
             engine.connect(engine.mainMixerNode, to: engine.outputNode, format: fmt)
         }
     }
+
+    /// Calidad del cambio de tempo (AUNewTimePitch, 3…32): más solape = menos artefactos.
+    static var timePitchOverlap: Float = {
+        let a = CommandLine.arguments
+        if let i = a.firstIndex(of: "--overlap"), i + 1 < a.count, let v = Float(a[i + 1]) { return v }
+        return Float(UserDefaults.standard.object(forKey: "MM8 TimePitch Overlap") as? Double ?? 16)
+    }()
+    /// Para pruebas: pasar todas las pistas por el cambio de tempo (como hasta ahora).
+    static var forceTimePitch = CommandLine.arguments.contains("--forcepitch")
 
     private static func value(_ env: [(t: Double, db: Double)], at t: Double) -> Double? {
         guard let first = env.first else { return nil }
@@ -200,14 +254,40 @@ final class MixGraph {
     func update(at mix: Double) {
         for c in chains {
             let item = c.item
+            if let p = c.pitch, mix <= item.mixEnd + 0.5 {
+                let ideal = mix >= item.mixStart ? item.rate(at: mix) : c.sync.idleRate
+                var r = ideal
+                if Self.servo {
+                    let s = c.sync
+                    // Lo que ha consumido desde el bloque anterior (con la velocidad real de entonces).
+                    if !s.lastMix.isNaN, mix > s.lastMix { s.consumed += Self.effectiveRate(s.lastRate, hop: s.hop) * (mix - s.lastMix) }
+                    s.lastMix = mix
+                    let err = expected(c, at: mix) - s.consumed           // > 0: va por detrás
+                    let want = ideal + max(-0.02, min(0.02, err / 0.2)) * ideal
+                    // Se pide un salto entero exacto (así el modelo coincide con lo que hace el AU), y
+                    // nunca exactamente 1,0: ahí AUNewTimePitch cambia de modo y su retardo salta
+                    // (medido: con 1,00013 la deriva pasaba de 41 a 88 ms en 5 minutos).
+                    var q = (want * s.hop).rounded()
+                    if q == s.hop { q = err >= 0 ? s.hop + 1 : s.hop - 1 }
+                    r = q / s.hop
+                    s.lastRate = r
+                }
+                let fr = Float(max(1.0 / 32, min(32, r)))
+                if p.rate != fr { p.rate = fr }          // cambiarlo cuesta: solo si cambia
+            }
+            // Antes de entrar y después de acabar la pista no hay nada más que ajustar.
+            if mix < item.mixStart - 0.5 || mix > item.mixEnd + 0.5 { continue }
             let seg = item.segments.first { mix >= $0.mixStart && mix < $0.mixEnd } ?? item.segments[0]
             let src = seg.source(item, at: mix)
             let db = Self.value(c.volume, at: src) ?? 0
-            c.player.volume = db <= -49.5 ? 0 : Float(pow(10, db / 20))
-            c.eq.bands[0].gain = Float(max(-60, min(24, Self.value(c.bass, at: src) ?? 0)))
-            c.eq.bands[1].gain = Float(max(-60, min(24, Self.value(c.mid, at: src) ?? 0)))
-            c.eq.bands[2].gain = Float(max(-60, min(24, Self.value(c.treble, at: src) ?? 0)))
-            if mix >= item.mixStart { c.pitch.rate = Float(max(1.0 / 32, min(32, item.rate(at: mix)))) }
+            let lin = db <= -49.5 ? 0 : pow(10, db / 20)
+            let gv = AUValue(min(1, lin / 4))
+            if let gp = c.gainParam, gp.value != gv { gp.value = gv }
+            if let eq = c.eq {
+                eq.bands[0].gain = Float(max(-60, min(24, Self.value(c.bass, at: src) ?? 0)))
+                eq.bands[1].gain = Float(max(-60, min(24, Self.value(c.mid, at: src) ?? 0)))
+                eq.bands[2].gain = Float(max(-60, min(24, Self.value(c.treble, at: src) ?? 0)))
+            }
             // Automatización de los efectos (Effects Parameter Markers)
             for f in c.fx where !f.auto.isEmpty {
                 for a in f.auto {
@@ -279,6 +359,13 @@ final class Player {
             self.peakR = max(r, self.peakR * 0.85)
         }
         setDevice()
+        // Estabilidad: si cambia el dispositivo de salida (se desenchufa, cambia la frecuencia de
+        // muestreo…), AVAudioEngine se para; se vuelve a montar y sigue sonando desde donde iba.
+        NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
+            guard let self else { return }
+            Log.write("cambio de configuración de audio (salida \(self.outputName))")
+            if self.isPlaying { let at = self.position; self.play(from: at) }
+        }
     }
 
     // MARK: Salida (Tools › Audio Output Configuration)

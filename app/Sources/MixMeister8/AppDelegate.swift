@@ -1,5 +1,6 @@
 import AppKit
 import UniformTypeIdentifiers
+import AVFoundation
 
 /// Arranque, ventana principal y las acciones de los menús. Los selectores son los mismos que los
 /// del original (openPlayList:, view4Strips:, snapToBeat:…), así los menús generados del nib
@@ -27,9 +28,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         playlist.table.doubleAction = #selector(playFromPlaylistRow(_:))
         session.loadLibrary()
         session.newPlaylist()
-        if let last = RecentFiles.list.first, FileManager.default.fileExists(atPath: last), CommandLine.arguments.count < 2 {
+        var recovered = false
+        if !testMode, FileManager.default.fileExists(atPath: Session.recoveryURL.path) {
+            let a = NSAlert()
+            let src = UserDefaults.standard.string(forKey: Session.recoverySourceKey) ?? ""
+            a.messageText = "MixMeister 8 se cerró sin guardar los cambios"
+            a.informativeText = "Hay una copia de recuperación de «\(src.isEmpty ? "untitled" : (src as NSString).lastPathComponent)». ¿Quieres recuperarla?"
+            a.addButton(withTitle: "Recuperar")
+            a.addButton(withTitle: "Descartar")
+            if a.runModal() == .alertFirstButtonReturn, (try? session.openRecovery()) != nil { recovered = true }
+            else { session.clearRecovery() }
+        }
+        if !recovered, let last = RecentFiles.list.first, FileManager.default.fileExists(atPath: last), CommandLine.arguments.count < 2 {
             try? session.open(last)
         }
+        if !testMode { session.startAutosave() }
         let argv = CommandLine.arguments
         for (k, a) in argv.enumerated().dropFirst() where a.lowercased().hasSuffix(".mmp") && !argv[k - 1].hasPrefix("--")
             && FileManager.default.fileExists(atPath: a) { openFile(a) }
@@ -102,20 +115,105 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             fflush(stdout)
         }
         if args.contains("--effectslist") { viewEffects(nil) }
+        // Prueba de calidad: --nulltest audio.mp3 salida.wav — una sola pista a su tempo, sin
+        // marcadores, exportada a 24 bits (debe salir idéntica al audio decodificado).
+        if let i = args.firstIndex(of: "--nulltest"), i + 2 < args.count {
+            let src = args[i + 1], out = URL(fileURLWithPath: args[i + 2])
+            let f = try? AVAudioFile(forReading: URL(fileURLWithPath: src))
+            let len = Int64(Double(f?.length ?? 0) / (f?.processingFormat.sampleRate ?? 44100) * 1e6)
+            let tr = PLTrack(path: src, transition_in: nil, transition_out: nil, file_id: "", bpm: 120, original_bpm: 120, bar_us: 2_000_000,
+                             length_us: len, overlay: false, key_semitones: 0, beat_markers_us: [], effects: [],
+                             layer: [.segment(PLSegment(reversed: false, class: 1, src_start_us: 0, src_end_us: len, anchor_us: 0,
+                                                        overlay_measure: 0, overlay_fraction: 0, overlay_rate: 1))])
+            session.mutate("test") { d in d.tracks = [tr] }
+            DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) {
+                let t0 = Date()
+                do { let u = try Exporter.toFiles(base: out, kind: .wav24, split: .none) { _ in true }; print("NULLTEST ok \(u[0].path) \(String(format: "%.1f", Date().timeIntervalSince(t0))) s") }
+                catch { print("NULLTEST error \(error)") }
+                fflush(stdout)
+                DispatchQueue.main.async { NSApp.terminate(nil) }
+            }
+        }
+        // Sincronía: --synctest audio.mp3 salida.wav — 10 s de silencio y después la pista (a su
+        // tempo). La pista debe empezar exactamente en 10,000 s (con --forcepitch pasa por el
+        // cambio de tempo; con --serial, render seguido como en directo).
+        if let i = args.firstIndex(of: "--synctest"), i + 2 < args.count {
+            let src = args[i + 1], out = URL(fileURLWithPath: args[i + 2])
+            let sil = URL(fileURLWithPath: NSTemporaryDirectory() + "mm8-silencio.wav")
+            let fmt = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 2)!
+            if let f = try? AVAudioFile(forWriting: sil, settings: fmt.settings), let b = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: 441000) {
+                b.frameLength = 441000
+                try? f.write(from: b)
+            }
+            let fa = try? AVAudioFile(forReading: URL(fileURLWithPath: src))
+            let len = Int64(Double(fa?.length ?? 0) / (fa?.processingFormat.sampleRate ?? 44100) * 1e6)
+            func track(_ p: String, _ l: Int64, intro: Int64, outro: Int64) -> PLTrack {
+                PLTrack(path: p, transition_in: nil, transition_out: nil, file_id: "", bpm: 120, original_bpm: 120, bar_us: 2_000_000,
+                        length_us: l, overlay: false, key_semitones: 0, beat_markers_us: [], effects: [],
+                        layer: [.marker(PLMarker(type: MarkerKind.introAnchor, pos_us: intro)), .marker(PLMarker(type: MarkerKind.outroAnchor, pos_us: outro)),
+                                .segment(PLSegment(reversed: false, class: 1, src_start_us: 0, src_end_us: l, anchor_us: 0,
+                                                   overlay_measure: 0, overlay_fraction: 0, overlay_rate: 1))])
+            }
+            let t1 = track(sil.path, 10_000_000, intro: 0, outro: 10_000_000)
+            var t2 = track(src, len, intro: 0, outro: len)
+            if let j = args.firstIndex(of: "--synctempo"), j + 1 < args.count, let v = Double(args[j + 1]) {
+                t2.layer.append(.marker(PLMarker(type: MarkerKind.originalTempo, pos_us: 0, value: v)))   // suena a v (audio a 120)
+            }
+            session.mutate("test") { d in d.tracks = [t1, t2] }
+            DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) {
+                do { let u = try Exporter.toFiles(base: out, kind: .wav24, split: .none) { _ in true }; print("SYNCTEST ok \(u[0].path) inicio pista 2 = \(String(format: "%.4f", self.session.layout.items[1].mixStart)) s") }
+                catch { print("SYNCTEST error \(error)") }
+                fflush(stdout)
+                DispatchQueue.main.async { NSApp.terminate(nil) }
+            }
+        }
+        // Velocidad: --wavetime espera a tener todas las formas de onda y dice cuánto tardó.
+        if args.contains("--wavetime") {
+            let t0 = Date()
+            Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { tm in
+                let n = self.session.doc.tracks.indices.filter { self.session.audioPath($0).flatMap { Waveforms.shared.get($0) } != nil }.count
+                if n == self.session.doc.tracks.count && n > 0 || Date().timeIntervalSince(t0) > 120 {
+                    tm.invalidate()
+                    print(String(format: "WAVETIME %d formas de onda en %.2f s", n, Date().timeIntervalSince(t0)))
+                    fflush(stdout)
+                    NSApp.terminate(nil)
+                }
+            }
+        }
+        // Estabilidad: --crashtest cambia la lista, guarda la copia de recuperación y se cierra de golpe.
+        if args.contains("--crashtest") {
+            session.mutateLight("crash test") { d in if !d.tracks.isEmpty { d.tracks[0].key_semitones = 1 } }
+            session.autosave()
+            print("CRASHTEST copia: \(FileManager.default.fileExists(atPath: Session.recoveryURL.path))")
+            fflush(stdout)
+            exit(3)
+        }
         if let i = args.firstIndex(of: "--saveas"), i + 1 < args.count {
             do { try session.save(to: args[i + 1]); print("SAVEAS ok \(args[i + 1])") } catch { print("SAVEAS error \(error)") }
             fflush(stdout)
+        }
+        // --where N t: qué audio de la pista N debe sonar en el instante t de la mezcla y a qué velocidad.
+        if let i = args.firstIndex(of: "--where"), i + 2 < args.count, let n = Int(args[i + 1]), let t = Double(args[i + 2]),
+           let it = session.layout.items.first(where: { $0.index == n - 1 }) {
+            let seg = it.segments.first { t >= $0.mixStart && t < $0.mixEnd } ?? it.segments[0]
+            print(String(format: "WHERE pista %d en %.3f s: audio %.4f s, velocidad %.5f · %@", n, t, seg.source(it, at: t), it.rate(at: t), session.audioPath(n - 1) ?? "-"))
+            fflush(stdout)
+            if args.contains("--quit") { NSApp.terminate(nil) }
         }
         // Diagnóstico del tempo por fila: MixMeister8 lista.mmp --dumpbpm
         if args.contains("--dumpbpm") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                 let L = self.session.layout
-                for it in L.items where !it.overlay {
+                for it in L.items {
                     var sum = 0.0, n = 0
                     var t = it.mixStart
                     while t < it.mixEnd { sum += it.tempo(at: t); n += 1; t += 0.25 }
                     let mid = it.tempo(at: (it.mixStart + it.mixEnd) / 2)
                     print(String(format: "BPM %2d entrada=%.1f inicio=%.1f medio=%.1f mitad=%.1f fin=%.1f", it.index + 1, it.tempo, it.tempo(at: it.mixStart), sum / Double(max(1, n)), mid, it.tempo(at: it.mixEnd - 0.1)))
+                    let tr = self.session.doc.tracks[it.index]
+                    print(String(format: "   pista %2d: %.1f–%.1f s, %d segmentos (%d invertidos), %d marcadores de tempo, overlay %d, tempo propio %.2f / audio %.2f",
+                                 it.index + 1, it.mixStart, it.mixEnd, tr.segments.count, tr.segments.filter(\.reversed).count,
+                                 tr.markers(MarkerKind.tempo).count, it.overlay ? 1 : 0, MixLayout.ownTempo(tr), MixLayout.audioTempo(tr)))
                 }
                 let tot = L.total
                 print(String(format: "TOTAL %d:%02d (%.1f s)", Int(tot) / 60, Int(tot) % 60, tot))
@@ -141,15 +239,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     func application(_ sender: NSApplication, openFile filename: String) -> Bool {
         // AppKit pasa como «fichero» cualquier argumento que no empiece por «-» (p. ej. el nombre
         // de un efecto en --addfx): solo se abren las rutas que existen.
-        guard FileManager.default.fileExists(atPath: filename) else { return false }
+        guard filename.lowercased().hasSuffix(".mmp"), FileManager.default.fileExists(atPath: filename) else { return false }
         openFile(filename); return true
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ s: NSApplication) -> Bool { true }
     /// Arrancada para una prueba (--snapshot, --exporttest…): al acabar se cierra sin preguntar.
-    private let testMode = CommandLine.arguments.contains { ["--snapshot", "--exporttest", "--playtest", "--dumpbpm", "--fxtest", "--saveas"].contains($0) }
+    private let testMode = CommandLine.arguments.contains { ["--snapshot", "--exporttest", "--serial", "--playtest", "--dumpbpm", "--fxtest", "--saveas", "--nulltest", "--synctest", "--quit", "--wavetime", "--crashtest"].contains($0) }
     func applicationShouldTerminate(_ s: NSApplication) -> NSApplication.TerminateReply {
         testMode || confirmDiscard() ? .terminateNow : .terminateCancel
     }
+    /// Salida normal (guardado o descartado a propósito): la copia de recuperación sobra.
+    func applicationWillTerminate(_ n: Notification) { if !testMode { session.clearRecovery() } }
     func windowWillReturnUndoManager(_ window: NSWindow) -> UndoManager? { session.undo }
 
     // MARK: Menús

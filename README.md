@@ -62,3 +62,5 @@ Se leen metadatos, recursos y ficheros de datos del original y se estudia su com
 descompila código para copiarlo, no se toca PACE Eden y no se reutilizan marca, skins,
 iconos, efectos ni textos del original. El motor no contiene código de MixMeister, de mm2027
 ni de proyectos GPL.
+
+- [docs/04-MEJORAS.md](docs/04-MEJORAS.md): mejoras sobre el original (calidad de audio, sincronía, velocidad, estabilidad) con sus mediciones.

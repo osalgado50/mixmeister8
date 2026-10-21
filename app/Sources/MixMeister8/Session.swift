@@ -75,6 +75,43 @@ final class Session {
         relayout()
     }
 
+    // MARK: Recuperación (autoguardado)
+
+    /// Cada minuto, si hay cambios sin guardar, se guarda una copia de recuperación. Si la app se
+    /// cierra de golpe, al abrirla se ofrece recuperarla. Al salir bien o al guardar, se borra.
+    static let recoveryURL: URL = {
+        let d = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("MixMeister 8", isDirectory: true)
+        try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
+        return d.appendingPathComponent("Recuperación.mmp")
+    }()
+    static let recoverySourceKey = "MM8 Recovery Source"
+    private var autosaveTimer: Timer?
+    func startAutosave() {
+        autosaveTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in self?.autosave() }
+    }
+    func autosave() {
+        guard dirty, !doc.tracks.isEmpty else { return }
+        do {
+            try engineDoc.write(doc)
+            try engineDoc.save(to: Self.recoveryURL.path)
+            UserDefaults.standard.set(path ?? "", forKey: Self.recoverySourceKey)
+            Log.write("copia de recuperación guardada")
+        } catch { Log.write("copia de recuperación: \(error)") }
+    }
+    func clearRecovery() {
+        try? FileManager.default.removeItem(at: Self.recoveryURL)
+        UserDefaults.standard.removeObject(forKey: Self.recoverySourceKey)
+    }
+    /// Abre la copia de recuperación como si fuera la lista original (sin guardar todavía).
+    func openRecovery() throws {
+        try open(Self.recoveryURL.path)
+        RecentFiles.remove(Self.recoveryURL.path)
+        let src = UserDefaults.standard.string(forKey: Self.recoverySourceKey) ?? ""
+        path = src.isEmpty ? nil : src
+        dirty = true
+        NotificationCenter.default.post(name: .playlistChanged, object: nil)
+    }
+
     func save(to p: String) throws {
         try engineDoc.write(doc)
         try engineDoc.save(to: p)
@@ -82,6 +119,7 @@ final class Session {
         path = p
         dirty = false
         RecentFiles.add(p)
+        clearRecovery()
         NotificationCenter.default.post(name: .playlistChanged, object: nil)
     }
 
@@ -191,6 +229,7 @@ enum RecentFiles {
         NSDocumentController.shared.noteNewRecentDocumentURL(URL(fileURLWithPath: p))
     }
     static func clear() { UserDefaults.standard.set([String](), forKey: key) }
+    static func remove(_ p: String) { UserDefaults.standard.set(list.filter { $0 != p }, forKey: key) }
 }
 
 /// Formas de onda calculadas en segundo plano con el motor.
@@ -203,16 +242,54 @@ final class Waveforms {
 
     func get(_ path: String) -> (peaks: [Float], seconds: Double)? { cache[path] }
 
+    /// Caché en disco (~/Library/Caches/es.mixmeister8/peaks): la forma de onda de un fichero se
+    /// calcula una vez (hay que decodificar todo el audio) y en los arranques siguientes se lee.
+    static let diskDir: URL = {
+        let d = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("es.mixmeister8/peaks", isDirectory: true)
+        try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
+        return d
+    }()
+    static var useDisk = !CommandLine.arguments.contains("--nowavecache")
+    private static func diskKey(_ path: String) -> URL? {
+        guard let a = try? FileManager.default.attributesOfItem(atPath: path),
+              let size = a[.size] as? Int64, let mod = a[.modificationDate] as? Date else { return nil }
+        var h: UInt64 = 1469598103934665603
+        for b in "\(path)|\(size)|\(mod.timeIntervalSince1970)|\(bins)".utf8 { h = (h ^ UInt64(b)) &* 1099511628211 }
+        return diskDir.appendingPathComponent(String(format: "%016llx.peaks", h))
+    }
+    private static func load(_ path: String) -> (peaks: [Float], seconds: Double)? {
+        guard useDisk, let u = diskKey(path), let d = try? Data(contentsOf: u), d.count == 8 + bins * 4 else { return nil }
+        let secs = d.withUnsafeBytes { $0.load(as: Double.self) }
+        let peaks = d.subdata(in: 8..<d.count).withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
+        return (peaks, secs)
+    }
+    private static func store(_ path: String, _ r: (peaks: [Float], seconds: Double)) {
+        guard useDisk, let u = diskKey(path), r.peaks.count == bins else { return }
+        var d = Data()
+        withUnsafeBytes(of: r.seconds) { d.append(contentsOf: $0) }
+        r.peaks.withUnsafeBytes { d.append(contentsOf: $0) }
+        try? d.write(to: u, options: .atomic)
+    }
+    private var started: Date?
+    var isIdle: Bool { pending.isEmpty }
+
     func request(_ path: String, track: Int) {
         guard cache[path] == nil, !pending.contains(path) else { return }
+        if pending.isEmpty { started = Date() }
         pending.insert(path)
         queue.async {
-            let r = try? Engine.peaks(path: path, bins: Self.bins)
+            var r = Self.load(path)
+            if r == nil, let p = try? Engine.peaks(path: path, bins: Self.bins) { r = p; Self.store(path, p) }
             DispatchQueue.main.async {
                 self.pending.remove(path)
                 if let r { self.cache[path] = r }
+                if self.pending.isEmpty, let t = self.started {
+                    Log.write(String(format: "formas de onda: %d en %.2f s", self.cache.count, Date().timeIntervalSince(t)))
+                    self.lastDuration = Date().timeIntervalSince(t)
+                }
                 NotificationCenter.default.post(name: .waveformReady, object: path)
             }
         }
     }
+    private(set) var lastDuration: Double?
 }

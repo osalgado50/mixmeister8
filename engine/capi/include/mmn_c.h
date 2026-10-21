@@ -47,6 +47,8 @@ char* mmn_analyze_json(const char* path, char** err);
 #define MMN_FX_FUZZWAH 3     /* drive, wah freq, resonance, lfo rate, lfo depth, mix */
 #define MMN_FX_FILTERGATE 4  /* cutoff, resonance, type (LP/BP/HP), gate rate, gate depth, mix */
 #define MMN_FX_STEREOIZER 5  /* width, haas, mix */
+#define MMN_FX_GAIN 6        /* ganancia sin escalones: valor = ganancia / 4 (0.25 = 0 dB) */
+#define MMN_FX_LIMITER 7     /* limitador con anticipación: umbral (−12..0 dB), release */
 
 typedef struct mmn_fx mmn_fx;
 int mmn_fx_param_count(int kind);
@@ -57,6 +59,8 @@ void mmn_fx_free(mmn_fx* fx);
 void mmn_fx_set(mmn_fx* fx, int param, float value);
 float mmn_fx_get(mmn_fx* fx, int param);
 void mmn_fx_reset(mmn_fx* fx);
+/* Retardo que introduce el efecto (muestras): solo el limitador. */
+int mmn_fx_latency(mmn_fx* fx);
 /* Procesa en el sitio; `right` puede ser NULL (mono). */
 void mmn_fx_process(mmn_fx* fx, float* left, float* right, int frames);
 

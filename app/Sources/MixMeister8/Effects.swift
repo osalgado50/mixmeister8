@@ -77,7 +77,8 @@ final class FxType {
 
 enum FxCatalog {
     static let manufacturer = fourCC("MM8x")
-    static let dspCodes: [Int32: String] = [MMN_FX_FLANGER: "m8fl", MMN_FX_PHASER: "m8ph", MMN_FX_FUZZWAH: "m8fw", MMN_FX_FILTERGATE: "m8fg", MMN_FX_STEREOIZER: "m8st"]
+    static let dspCodes: [Int32: String] = [MMN_FX_FLANGER: "m8fl", MMN_FX_PHASER: "m8ph", MMN_FX_FUZZWAH: "m8fw", MMN_FX_FILTERGATE: "m8fg", MMN_FX_STEREOIZER: "m8st",
+                                           MMN_FX_GAIN: "m8gn", MMN_FX_LIMITER: "m8lt"]
 
     static func dspDescription(_ kind: Int32) -> AudioComponentDescription {
         AudioComponentDescription(componentType: kAudioUnitType_Effect, componentSubType: fourCC(dspCodes[kind] ?? "m8fl"),

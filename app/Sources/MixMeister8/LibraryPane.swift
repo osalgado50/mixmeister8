@@ -89,6 +89,7 @@ final class LibraryPane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSS
         visible = Columns.layout(prefix: "Catalog", keys: Columns.libraryKeys, defaults: ["Title", "Artist", "Bpm", "Album", "Time", "Key", "KeyCode"])
         rebuildColumns()
         NotificationCenter.default.addObserver(self, selector: #selector(reload), name: .libraryChanged, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(referenceChanged), name: .selectionChanged, object: nil)
         reload()
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -142,6 +143,36 @@ final class LibraryPane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSS
         for v in libraryControls { v.isHidden = i == 1 }
     }
     var showingEffects: Bool { tabs.selectedSegment == 1 }
+
+    // MARK: Compatibles con la pista seleccionada (nuevo en MixMeister 8)
+
+    /// Con una pista seleccionada en la lista, la biblioteca marca las que mezclan bien con ella:
+    /// tonalidad compatible (mismo KEYCODE, ±1 en el círculo o su relativa mayor/menor) y BPM a
+    /// menos de un 6 % (o del doble/mitad).
+    private var reference: LibraryItem?
+    @objc private func referenceChanged() {
+        let s = Session.shared
+        reference = s.selectedTrack.flatMap { $0 < s.doc.tracks.count ? s.libraryItem(for: s.doc.tracks[$0]) : nil }
+        table.enumerateAvailableRowViews { rv, row in self.tint(rv, row) }
+        table.reloadData()
+    }
+    static func keyCompatible(_ a: LibraryItem, _ b: LibraryItem) -> Bool {
+        guard let n = a.keyCodeNumber, let m = b.keyCodeNumber else { return false }
+        if a.minor != b.minor { return n == m }
+        let d = abs(n - m)
+        return d == 0 || d == 1 || d == 11
+    }
+    static func bpmCompatible(_ a: LibraryItem, _ b: LibraryItem) -> Bool {
+        guard a.bpm > 0, b.bpm > 0 else { return false }
+        return [1.0, 2.0, 0.5].contains { abs(a.bpm * $0 - b.bpm) / b.bpm < 0.06 }
+    }
+    private func tint(_ rv: NSTableRowView, _ row: Int) {
+        guard let ref = reference, row < rows.count, rows[row].path != ref.path else { rv.backgroundColor = .clear; return }
+        let it = rows[row]
+        let k = Self.keyCompatible(it, ref), b = Self.bpmCompatible(it, ref)
+        rv.backgroundColor = k && b ? Theme.accent.withAlphaComponent(0.16) : .clear
+    }
+    func tableView(_ tv: NSTableView, didAdd rv: NSTableRowView, forRow row: Int) { tint(rv, row) }
 
     var selectedItems: [LibraryItem] { table.selectedRowIndexes.compactMap { $0 < rows.count ? rows[$0] : nil } }
 
@@ -236,6 +267,10 @@ final class LibraryPane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSS
         t.alignment = Columns.def(key)?.numeric == true ? .right : .left
         t.font = key == "KeyCode" ? Theme.font(13, .semibold) : (Columns.def(key)?.numeric == true ? Theme.mono(11.5) : Theme.font(11.5))
         t.textColor = key == "KeyCode" ? KeyColors.color(it.keyCodeNumber) : Theme.text
+        if let ref = reference, ref.path != it.path {
+            if (key == "Key" || key == "KeyCode"), Self.keyCompatible(it, ref) { t.font = Theme.font(key == "KeyCode" ? 13 : 11.5, .heavy) }
+            if key == "Bpm", Self.bpmCompatible(it, ref) { t.textColor = Theme.accent }
+        }
         return t
     }
 
