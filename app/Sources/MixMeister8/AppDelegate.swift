@@ -18,7 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     static let mmpType = UTType(filenameExtension: "mmp") ?? .data
 
     func applicationDidFinishLaunching(_ n: Notification) {
-        NSApp.appearance = NSAppearance(named: .darkAqua)
+        NSApp.appearance = NSAppearance(named: Theme.skin.dark ? .darkAqua : .aqua)
         FxCatalog.registerDSP()
         buildMenus()
         buildWindow()
@@ -174,6 +174,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             }
         }
         retarget(main)
+        // View › Skin: los seis aspectos.
+        if let view = main.items.first(where: { $0.title == "View" })?.submenu {
+            view.addItem(.separator())
+            let item = NSMenuItem(title: "Skin", action: nil, keyEquivalent: "")
+            let sub = NSMenu(title: "Skin")
+            for (i, sk) in Skin.all.enumerated() {
+                let it = NSMenuItem(title: sk.name, action: #selector(chooseSkin(_:)), keyEquivalent: "")
+                it.tag = i
+                it.target = self
+                it.state = sk.name == Theme.skin.name ? .on : .off
+                sub.addItem(it)
+            }
+            item.submenu = sub
+            view.addItem(item)
+        }
         // Open Recent Playlist y Tools › Transitions se rellenan al abrirse.
         recentMenu?.delegate = self
         transitionsMenu?.delegate = self
@@ -593,6 +608,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
 
     // MARK: View
+    /// View › Skin: se guarda y se aplica al reiniciar (la app se vuelve a abrir sola).
+    @objc func chooseSkin(_ item: NSMenuItem) {
+        let sk = Skin.all[item.tag]
+        guard sk.name != Theme.skin.name else { return }
+        UserDefaults.standard.set(sk.name, forKey: Skin.defaultsKey)
+        item.menu?.items.forEach { $0.state = $0.tag == item.tag ? .on : .off }
+        let a = NSAlert()
+        a.messageText = "Skin «\(sk.name)»"
+        a.informativeText = "Se aplica al volver a abrir MixMeister 8. ¿Reiniciar ahora?"
+        a.addButton(withTitle: "Reiniciar")
+        a.addButton(withTitle: "Más tarde")
+        guard a.runModal() == .alertFirstButtonReturn, confirmDiscard() else { return }
+        let cfg = NSWorkspace.OpenConfiguration()
+        cfg.createsNewApplicationInstance = true
+        cfg.arguments = session.path.map { [$0] } ?? []
+        session.dirty = false
+        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: cfg) { _, _ in
+            DispatchQueue.main.async { NSApp.terminate(nil) }
+        }
+    }
 
     @objc func view2Strips(_ s: Any?) { session.strips = 2 }
     @objc func view4Strips(_ s: Any?) { session.strips = 4 }

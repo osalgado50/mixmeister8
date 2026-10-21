@@ -125,7 +125,7 @@ final class TimelineView: NSView {
         // Segmentos
         for seg in item.segments {
             let r = NSRect(x: x(seg.mixStart), y: full.minY, width: max(2, x(seg.mixEnd) - x(seg.mixStart)), height: full.height)
-            let path = NSBezierPath(roundedRect: r, xRadius: 4, yRadius: 4)
+            let path = NSBezierPath(roundedRect: r, xRadius: Theme.radius, yRadius: Theme.radius)
             (selected ? Theme.clipSelected : (item.overlay ? Theme.overlay : Theme.clip)).setFill()
             path.fill()
             (selected ? Theme.accent : Theme.gridStrong).setStroke()
@@ -149,7 +149,7 @@ final class TimelineView: NSView {
                     }
                     px += step
                 }
-                (selected ? Theme.accent.withAlphaComponent(0.85) : Theme.wave).setStroke()
+                (selected ? Theme.clipSelectedInk.withAlphaComponent(0.85) : Theme.wave).setStroke()
                 wavePath.lineWidth = 1
                 wavePath.stroke()
             } else if s.audioPath(item.index) == nil {
@@ -166,7 +166,7 @@ final class TimelineView: NSView {
         let lib = s.libraryItem(for: t)
         let name = "\(item.index + 1) - \"\(lib?.title.isEmpty == false ? lib!.title : t.title)\"" + (lib.map { $0.artist.isEmpty ? "" : " by \($0.artist)" } ?? "")
         (name as NSString).draw(at: NSPoint(x: full.minX + 5, y: full.minY + 1),
-                                withAttributes: [.font: Theme.font(10, .medium), .foregroundColor: selected ? Theme.accent : Theme.text])
+                                withAttributes: [.font: Theme.font(10, .medium), .foregroundColor: selected ? Theme.clipSelectedInk : Theme.clipText])
 
         // Bucles: sombreado entre inicio y fin
         let starts = t.markers(MarkerKind.loopStart).map { item.toMix(Double($0.pos_us) * 1e-6) }.sorted()

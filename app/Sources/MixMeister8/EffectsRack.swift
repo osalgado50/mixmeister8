@@ -134,13 +134,13 @@ final class RackModule: NSView {
     }
 
     override func draw(_ r: NSRect) {
-        Theme.panelRaised.setFill(); NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 4, yRadius: 4).fill()
+        Theme.panelRaised.setFill(); NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: Theme.radius, yRadius: Theme.radius).fill()
         let bar = NSRect(x: 0, y: 0, width: bounds.width, height: Self.titleHeight)
-        (selected ? Theme.accentDeep : Theme.header).setFill(); NSBezierPath(roundedRect: bar, xRadius: 4, yRadius: 4).fill()
+        (selected ? Theme.accentDeep : Theme.header).setFill(); NSBezierPath(roundedRect: bar, xRadius: Theme.radius, yRadius: Theme.radius).fill()
         (title as NSString).draw(in: NSRect(x: 24, y: 3, width: bounds.width - 28, height: 14),
-                                 withAttributes: [.font: Theme.font(10.5, .semibold), .foregroundColor: Theme.text])
+                                 withAttributes: [.font: Theme.font(10.5, .semibold), .foregroundColor: selected && !Theme.skin.dark ? NSColor.white : Theme.text])
         (selected ? Theme.accent : Theme.gridStrong).setStroke()
-        NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 4, yRadius: 4).stroke()
+        NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: Theme.radius, yRadius: Theme.radius).stroke()
     }
 
     override func mouseDown(with e: NSEvent) {

@@ -5,7 +5,7 @@ import AppKit
 final class TimelinePane: NSView {
     let timeline = TimelineView()
     private let scroll = NSScrollView()
-    private let status = label("CURRENT 00:00:00   REMAINING 00:00:00   TOTAL 00:00:00", size: 10.5, weight: .semibold, color: Theme.background)
+    private let status = label("CURRENT 00:00:00   REMAINING 00:00:00   TOTAL 00:00:00", size: 10.5, weight: .semibold, color: Theme.onAccent)
     private let bpmField = NSTextField()
     private let bpmStepper = NSStepper()
     private let zoom = NSSlider(value: 0.35, minValue: 0, maxValue: 1, target: nil, action: nil)

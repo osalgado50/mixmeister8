@@ -158,6 +158,7 @@ final class PlaylistPane: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
             p.wantsLayer = true
             p.layer?.backgroundColor = (t.overlay ? Theme.overlay : Theme.accentDeep).cgColor
             p.layer?.cornerRadius = 3
+            p.appearance = NSAppearance(named: .darkAqua)     // texto claro sobre la pastilla en cualquier skin
             let current = t.transition_out ?? (row == s.doc.tracks.count - 1 ? "" : Transitions.default)
             var names = Transitions.names
             if !current.isEmpty, !names.contains(current) { names.append(current) }   // «Beatmix Custom»…
