@@ -28,6 +28,7 @@ enum Theme {
     static let clipSelected = NSColor(srgbRed: 0.27, green: 0.34, blue: 0.20, alpha: 1)
     static let wave = NSColor(white: 0.78, alpha: 0.85)
     static let overlay = NSColor(srgbRed: 0.18, green: 0.24, blue: 0.32, alpha: 1)
+    static let effect = NSColor(srgbRed: 0.36, green: 0.88, blue: 0.95, alpha: 1)       // automatización de efectos
     static let playhead = NSColor(srgbRed: 1.0, green: 0.30, blue: 0.25, alpha: 1)
 
     static func font(_ size: CGFloat, _ weight: NSFont.Weight = .regular) -> NSFont { .systemFont(ofSize: size, weight: weight) }

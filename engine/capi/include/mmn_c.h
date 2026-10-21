@@ -40,6 +40,26 @@ double mmn_audio_peaks(const char* path, float* out, size_t bins, char** err);
 /* Análisis de una pista (tempo, rejilla, tonalidad) en JSON. Liberar con mmn_free_string. */
 char* mmn_analyze_json(const char* path, char** err);
 
+/* ---------- Efectos propios (sustituyen a los AIR/NewBlue del original) ----------------------- */
+
+#define MMN_FX_FLANGER 1     /* rate, depth, feedback, mix */
+#define MMN_FX_PHASER 2      /* rate, depth, feedback, stages, mix */
+#define MMN_FX_FUZZWAH 3     /* drive, wah freq, resonance, lfo rate, lfo depth, mix */
+#define MMN_FX_FILTERGATE 4  /* cutoff, resonance, type (LP/BP/HP), gate rate, gate depth, mix */
+#define MMN_FX_STEREOIZER 5  /* width, haas, mix */
+
+typedef struct mmn_fx mmn_fx;
+int mmn_fx_param_count(int kind);
+float mmn_fx_param_default(int kind, int param);
+mmn_fx* mmn_fx_new(int kind, double sample_rate, int channels);
+void mmn_fx_free(mmn_fx* fx);
+/* Parámetros normalizados 0..1. Se pueden cambiar desde otro hilo mientras se procesa. */
+void mmn_fx_set(mmn_fx* fx, int param, float value);
+float mmn_fx_get(mmn_fx* fx, int param);
+void mmn_fx_reset(mmn_fx* fx);
+/* Procesa en el sitio; `right` puede ser NULL (mono). */
+void mmn_fx_process(mmn_fx* fx, float* left, float* right, int frames);
+
 #ifdef __cplusplus
 }
 #endif

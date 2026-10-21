@@ -33,6 +33,18 @@ final class MixGraph {
         let item: MixLayout.Item
         let volume: [(t: Double, db: Double)]      // por posición en el audio (s)
         let bass: [(t: Double, db: Double)], mid: [(t: Double, db: Double)], treble: [(t: Double, db: Double)]
+        var fx: [FxSlot] = []
+    }
+    /// Un efecto conectado: su nodo y su automatización (marcadores 0x08000000 de la pista).
+    final class FxSlot {
+        let slot: UInt32
+        let node: AVAudioUnitEffect
+        let type: FxType
+        var resolved: FxCatalog.Resolved
+        var auto: [(param: Int, env: [(t: Double, db: Double)])] = []
+        init(slot: UInt32, node: AVAudioUnitEffect, type: FxType, resolved: FxCatalog.Resolved) {
+            self.slot = slot; self.node = node; self.type = type; self.resolved = resolved
+        }
     }
     let engine: AVAudioEngine
     private(set) var chains: [Chain] = []
@@ -41,10 +53,33 @@ final class MixGraph {
         componentType: kAudioUnitType_Effect, componentSubType: kAudioUnitSubType_PeakLimiter,
         componentManufacturer: kAudioUnitManufacturer_Apple, componentFlags: 0, componentFlagsMask: 0))
     let layout: MixLayout
-    let doc: PLDocument
+    private(set) var doc: PLDocument
+    private var masterFx: [FxSlot] = []
+    /// De dónde salen los nodos de efecto: en directo, del FxPool (persisten entre reproducciones
+    /// y el panel de control actúa sobre ellos); al exportar, nodos nuevos.
+    let fxNode: (PLEffect, FxType) -> AVAudioUnitEffect?
 
-    init(engine: AVAudioEngine, layout: MixLayout, doc: PLDocument) {
-        self.engine = engine; self.layout = layout; self.doc = doc
+    init(engine: AVAudioEngine, layout: MixLayout, doc: PLDocument,
+         fxNode: @escaping (PLEffect, FxType) -> AVAudioUnitEffect? = { _, t in FxHost.makeNode(t) }) {
+        self.engine = engine; self.layout = layout; self.doc = doc; self.fxNode = fxNode
+    }
+
+    private func makeSlots(_ effects: [PLEffect]) -> [FxSlot] {
+        effects.compactMap { e in
+            let r = FxCatalog.resolve(e)
+            guard let t = r.type, let n = fxNode(e, t) else { return nil }
+            FxHost.apply(e, r, to: n)
+            return FxSlot(slot: e.slot, node: n, type: t, resolved: r)
+        }
+    }
+    private static func automation(_ t: PLTrack, _ slots: [FxSlot]) {
+        for s in slots {
+            var byParam: [Int: [(t: Double, db: Double)]] = [:]
+            for m in t.markers where m.type == MarkerKind.effectParam && m.flag >> 12 == s.slot {
+                byParam[Int(m.flag & 0xFFF), default: []].append((Double(m.pos_us) * 1e-6, m.value))
+            }
+            s.auto = byParam.map { ($0.key, $0.value.sorted { $0.t < $1.t }) }
+        }
     }
 
     /// Crea las cadenas de las pistas que aún suenan después de `from`. Devuelve cuántas.
@@ -57,14 +92,23 @@ final class MixGraph {
             func env(_ kinds: [UInt32]) -> [(t: Double, db: Double)] {
                 t.markers.filter { kinds.contains($0.type) }.map { (Double($0.pos_us) * 1e-6, $0.value) }.sorted { $0.t < $1.t }
             }
-            let c = Chain(index: item.index, file: file, item: item,
+            var c = Chain(index: item.index, file: file, item: item,
                           volume: env([MarkerKind.volume, MarkerKind.autoVolume, MarkerKind.autoVolumeIn]),
                           bass: env([MarkerKind.bass]), mid: env([MarkerKind.mid]), treble: env([MarkerKind.treble]))
+            c.fx = makeSlots(t.effects)
+            Self.automation(t, c.fx)
             engine.attach(c.player); engine.attach(c.pitch); engine.attach(c.eq)
             let fmt = file.processingFormat
             engine.connect(c.player, to: c.pitch, format: fmt)
             engine.connect(c.pitch, to: c.eq, format: fmt)
-            engine.connect(c.eq, to: engine.mainMixerNode, format: fmt)
+            // pista → efectos de la pista (en orden, de izquierda a derecha en el rack) → mezclador
+            var last: AVAudioNode = c.eq
+            for f in c.fx {
+                engine.attach(f.node)
+                engine.connect(last, to: f.node, format: fmt)
+                last = f.node
+            }
+            engine.connect(last, to: engine.mainMixerNode, format: fmt)
             c.pitch.pitch = Float(t.key_semitones * 100)      // Track Settings › Key Adjustment (cents)
             c.pitch.overlap = 8
             let b = c.eq.bands
@@ -75,11 +119,18 @@ final class MixGraph {
             chains.append(c)
         }
         engine.mainMixerNode.outputVolume = Float(pow(10, doc.master_gain_db / 20))
-        // mezclador → limitador → salida
+        // mezclador → efectos del master → limitador → salida
         let fmt = engine.mainMixerNode.outputFormat(forBus: 0)
         engine.attach(limiter)
         engine.disconnectNodeOutput(engine.mainMixerNode)
-        engine.connect(engine.mainMixerNode, to: limiter, format: fmt)
+        masterFx = makeSlots(doc.master_effects)
+        var last: AVAudioNode = engine.mainMixerNode
+        for f in masterFx {
+            engine.attach(f.node)
+            engine.connect(last, to: f.node, format: fmt)
+            last = f.node
+        }
+        engine.connect(last, to: limiter, format: fmt)
         engine.connect(limiter, to: engine.outputNode, format: fmt)
         AudioUnitSetParameter(limiter.audioUnit, kLimiterParam_PreGain, kAudioUnitScope_Global, 0, -1.0, 0)
         return chains.count
@@ -121,8 +172,11 @@ final class MixGraph {
             c.player.stop()
             engine.disconnectNodeOutput(c.player); engine.disconnectNodeOutput(c.pitch); engine.disconnectNodeOutput(c.eq)
             engine.detach(c.player); engine.detach(c.pitch); engine.detach(c.eq)
+            for f in c.fx { engine.disconnectNodeOutput(f.node); engine.detach(f.node); f.node.reset() }
         }
         chains.removeAll()
+        for f in masterFx { engine.disconnectNodeOutput(f.node); engine.detach(f.node); f.node.reset() }
+        masterFx.removeAll()
         if limiter.engine != nil {
             let fmt = engine.mainMixerNode.outputFormat(forBus: 0)
             engine.disconnectNodeOutput(limiter)
@@ -154,7 +208,35 @@ final class MixGraph {
             c.eq.bands[1].gain = Float(max(-60, min(24, Self.value(c.mid, at: src) ?? 0)))
             c.eq.bands[2].gain = Float(max(-60, min(24, Self.value(c.treble, at: src) ?? 0)))
             if mix >= item.mixStart { c.pitch.rate = Float(max(1.0 / 32, min(32, item.rate(at: mix)))) }
+            // Automatización de los efectos (Effects Parameter Markers)
+            for f in c.fx where !f.auto.isEmpty {
+                for a in f.auto {
+                    guard let v = Self.value(a.env, at: src) else { continue }
+                    if a.param == 0xFFF { f.node.bypass = v < 0.5; continue }
+                    guard f.resolved.native, a.param < f.type.params.count else { continue }
+                    FxHost.set(f.type, f.type.params[a.param], v, on: f.node)
+                }
+            }
         }
+    }
+
+    /// Cambios en los efectos sin volver a montar el grafo (al mover un knob mientras suena).
+    func applyEffects(_ d: PLDocument) {
+        doc = d
+        for c in chains where c.index < d.tracks.count {
+            let t = d.tracks[c.index]
+            for f in c.fx { if let e = t.effects.first(where: { $0.slot == f.slot }) { FxHost.apply(e, f.resolved, to: f.node) } }
+            Self.automation(t, c.fx)
+        }
+        for f in masterFx { if let e = d.master_effects.first(where: { $0.slot == f.slot }) { FxHost.apply(e, f.resolved, to: f.node) } }
+    }
+    /// ¿Tiene el grafo los mismos efectos (instancias y orden) que la lista?
+    func sameEffects(as d: PLDocument) -> Bool {
+        guard masterFx.map(\.slot) == d.master_effects.map(\.slot) else { return false }
+        for c in chains where c.index < d.tracks.count {
+            if c.fx.map(\.slot) != d.tracks[c.index].effects.map(\.slot) { return false }
+        }
+        return true
     }
 }
 
@@ -223,7 +305,7 @@ final class Player {
         stopNodes()
         let s = Session.shared
         let from = max(0, min(t, max(0, s.layout.total - 0.05)))
-        let g = MixGraph(engine: engine, layout: s.layout, doc: s.doc)
+        let g = MixGraph(engine: engine, layout: s.layout, doc: s.doc) { e, t in FxPool.shared.node(for: e, type: t) }
         let n = g.build(from: from) { s.audioPath($0) }
         Log.write("play desde \(String(format: "%.2f", from)) s: \(n) pistas con audio de \(s.layout.items.count)")
         guard n > 0 else { pausedAt = from; return }
@@ -274,6 +356,12 @@ final class Player {
         engine.reset()
         isPlaying = false
         peakL = 0; peakR = 0
+    }
+
+    /// Efectos cambiados: se aplican al momento; si cambió qué efectos hay, se vuelve a montar.
+    func effectsChanged() {
+        guard isPlaying, let g = graph else { return }
+        if g.sameEffects(as: Session.shared.doc) { g.applyEffects(Session.shared.doc) } else { play(from: position) }
     }
 
     private func tick() {

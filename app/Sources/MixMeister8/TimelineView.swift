@@ -21,6 +21,7 @@ final class TimelineView: NSView {
             NotificationCenter.default.addObserver(self, selector: #selector(changed), name: n, object: nil)
         }
         menu = MenuSpecs.timelineTrack.build()
+        registerForDraggedTypes([.mm8Effect])
     }
     required init?(coder: NSCoder) { fatalError() }
 
@@ -186,6 +187,14 @@ final class TimelineView: NSView {
             drawEnvelope(m.map { (item.toMix(Double($0.pos_us) * 1e-6), bodyTop + bodyH / 2 + CGFloat(-$0.value / 50) * bodyH / 2) }, color: color, full: full, baseline: nil)
         }
 
+        // Automatización del parámetro de efecto elegido en el rack (Effects Parameter Markers)
+        if let tp = s.trackedParam, tp.track == item.index {
+            let key = tp.slot << 12 | UInt32(tp.param)
+            let m = t.markers.filter { $0.type == MarkerKind.effectParam && $0.flag == key }.sorted { $0.pos_us < $1.pos_us }
+            drawEnvelope(m.map { (item.toMix(Double($0.pos_us) * 1e-6), bodyTop + bodyH * CGFloat(1 - min(1, max(0, $0.value)))) },
+                         color: Theme.effect, full: full, baseline: nil)
+        }
+
         // Tempo (verde), etiquetas (bandera numerada), anclas (triángulos naranja)
         for m in t.markers(MarkerKind.tempo) {
             let px = x(item.toMix(Double(m.pos_us) * 1e-6))
@@ -262,7 +271,7 @@ final class TimelineView: NSView {
         let p = convert(e.locationInWindow, from: nil)
         if p.y >= laneTop {
             laneClick = (max(0, time(p.x)), lanePoint(at: p.x))
-            if e.clickCount == 2, laneClick.point != nil { NSApp.sendAction(NSSelectorFromString("editRulerMarkerItem:"), to: nil, from: self); return }
+            if e.clickCount == 2, let pt = laneClick.point { beginLaneEdit(pt); return }
         } else if p.y >= Self.rulerHeight {
             let hit = trackRects.last { $0.rect.contains(p) }
             Session.shared.selectedTrack = hit?.index
@@ -284,6 +293,47 @@ final class TimelineView: NSView {
             return MenuSpecs.timelineTrack.build()
         }
         return MenuSpecs.timelineStrips.build()
+    }
+
+    // MARK: Doble clic en un BPM de la barra de tempos: se escribe ahí mismo
+
+    private var laneEditor: NSTextField?
+    private func beginLaneEdit(_ pt: (track: Int, type: UInt32, mix: Double)) {
+        laneEditor?.removeFromSuperview()
+        let v = Session.shared.layout.tempoPoints.first { $0.track == pt.track && abs($0.mix - pt.mix) < 1e-6 }?.bpm ?? 0
+        let f = NSTextField(frame: NSRect(x: x(pt.mix) + 2, y: laneTop + 1, width: 62, height: Self.tempoLaneHeight - 2))
+        f.stringValue = String(format: "%.2f", v)
+        f.font = Theme.mono(9.5, .semibold)
+        f.isBordered = false
+        f.drawsBackground = true
+        f.backgroundColor = NSColor(white: 0.92, alpha: 1)
+        f.textColor = .black
+        f.focusRingType = .none
+        f.target = self
+        f.action = #selector(laneEditDone(_:))
+        addSubview(f)
+        laneEditor = f
+        window?.makeFirstResponder(f)
+        f.currentEditor()?.selectAll(nil)
+    }
+    @objc private func laneEditDone(_ f: NSTextField) {
+        let v = Double(f.stringValue.replacingOccurrences(of: ",", with: "."))
+        f.removeFromSuperview()
+        laneEditor = nil
+        window?.makeFirstResponder(self)
+        if let v, v >= 20, v <= 300 { (NSApp.delegate as? AppDelegate)?.setLaneMarkerValue(v) }
+    }
+    override func cancelOperation(_ sender: Any?) { laneEditor?.removeFromSuperview(); laneEditor = nil }
+
+    // MARK: Soltar un efecto: en una pista (efecto de pista) o en el fondo (efecto del master)
+
+    override func draggingEntered(_ s: NSDraggingInfo) -> NSDragOperation { s.draggingPasteboard.types?.contains(.mm8Effect) == true ? .copy : [] }
+    override func draggingUpdated(_ s: NSDraggingInfo) -> NSDragOperation { .copy }
+    override func performDragOperation(_ s: NSDraggingInfo) -> Bool {
+        guard let name = s.draggingPasteboard.string(forType: .mm8Effect) else { return false }
+        let p = convert(s.draggingLocation, from: nil)
+        let hit = p.y >= Self.rulerHeight && p.y < laneTop ? trackRects.last { $0.rect.contains(p) }?.index : nil
+        return EffectsActions.add(named: name, toTrack: hit)
     }
 
     override func keyDown(with e: NSEvent) {

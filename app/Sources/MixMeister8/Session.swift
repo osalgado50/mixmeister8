@@ -6,6 +6,7 @@ extension Notification.Name {
     static let selectionChanged = Notification.Name("mm8.selectionChanged")
     static let waveformReady = Notification.Name("mm8.waveformReady")
     static let viewOptionsChanged = Notification.Name("mm8.viewOptionsChanged")
+    static let effectsChanged = Notification.Name("mm8.effectsChanged")
 }
 
 /// Estado de la sesión: la lista abierta, la biblioteca y lo que hay seleccionado.
@@ -18,6 +19,9 @@ final class Session {
     private(set) var path: String?
     private(set) var layout = MixLayout.empty
     var dirty = false
+    /// Parámetro de efecto que se ve con marcadores en la línea de tiempo (lo elige el rack).
+    struct TrackedParam: Equatable { var track: Int; var slot: UInt32; var param: Int }
+    var trackedParam: TrackedParam?
     var selectedTrack: Int? { didSet { if oldValue != selectedTrack { NotificationCenter.default.post(name: .selectionChanged, object: nil) } } }
     var strips: Int = {
         let k = "Number of Strips in the Timeline"
@@ -46,6 +50,7 @@ final class Session {
 
     func newPlaylist() {
         Player.shared.stop()
+        FxPool.shared.reset()
         engineDoc = EngineDocument()
         doc = PLDocument(format: "mmp", version: nil, master_gain_db: 0, master_effects: [], tracks: [])
         path = nil
@@ -59,6 +64,7 @@ final class Session {
         let e = try EngineDocument(path: p)
         let d = try e.read()
         Player.shared.stop()
+        FxPool.shared.reset()
         engineDoc = e
         doc = d
         path = p
@@ -92,6 +98,23 @@ final class Session {
         resolveAll()
         relayout()
     }
+    /// Cambios que no mueven nada en la mezcla (parámetros de efectos, automatización, compases del
+    /// Song Slicer sin cambio de tempo): con deshacer, sin recolocar y sin cortar la reproducción.
+    /// `coalesce`: varios cambios seguidos con el mismo nombre (girar un knob) son un solo deshacer.
+    private var lastLight: (name: String, at: Date)?
+    func mutateLight(_ name: String, coalesce: Bool = false, _ change: (inout PLDocument) -> Void) {
+        let before = doc
+        change(&doc)
+        let after = doc
+        let join = coalesce && lastLight?.name == name && Date().timeIntervalSince(lastLight!.at) < 1.0
+        if !join { undo.registerUndo(withTarget: self) { s in s.restore(before, redo: after, name: name) }; undo.setActionName(name) }
+        lastLight = (name, Date())
+        dirty = true
+        Player.shared.effectsChanged()
+        NotificationCenter.default.post(name: .effectsChanged, object: nil)
+        NotificationCenter.default.post(name: .playlistChanged, object: nil)
+    }
+
     private func restore(_ d: PLDocument, redo: PLDocument, name: String) {
         doc = d
         undo.registerUndo(withTarget: self) { s in s.restore(redo, redo: d, name: name) }

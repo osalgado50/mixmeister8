@@ -19,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     func applicationDidFinishLaunching(_ n: Notification) {
         NSApp.appearance = NSAppearance(named: .darkAqua)
+        FxCatalog.registerDSP()
         buildMenus()
         buildWindow()
         playlist.stopButton.target = self
@@ -29,7 +30,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         if let last = RecentFiles.list.first, FileManager.default.fileExists(atPath: last), CommandLine.arguments.count < 2 {
             try? session.open(last)
         }
-        for a in CommandLine.arguments.dropFirst() where a.lowercased().hasSuffix(".mmp") { openFile(a) }
+        let argv = CommandLine.arguments
+        for (k, a) in argv.enumerated().dropFirst() where a.lowercased().hasSuffix(".mmp") && !argv[k - 1].hasPrefix("--")
+            && FileManager.default.fileExists(atPath: a) { openFile(a) }
         updateTitle()
         NotificationCenter.default.addObserver(forName: .playlistChanged, object: nil, queue: .main) { [weak self] _ in self?.updateTitle() }
         // Verificación sin pantalla: MixMeister8 --snapshot salida.png [lista.mmp] [--select N] [--zoom Z]
@@ -66,6 +69,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                 DispatchQueue.main.async { NSApp.terminate(nil) }
             }
         }
+        // Efectos: --fxtest lista todos y comprueba que cargan; --addfx "Nombre - Fabricante" [--fxtrack N]
+        // añade uno (a la pista N o al master) antes de --snapshot / --exporttest.
+        if args.contains("--fxtest") {
+            print("FXTEST \(FxCatalog.builtIn.count) propios, \(FxCatalog.installed.count) Audio Units instalados")
+            for t in args.contains("--fxall") ? FxCatalog.all : FxCatalog.builtIn {
+                let n = FxHost.makeNode(t)
+                print("FXTEST \(n == nil ? "FALLA" : "ok   ") \(t.listName) · \(t.params.count) parámetros · código \(fourCCString(t.code))")
+                fflush(stdout)
+            }
+            fflush(stdout)
+            if !args.contains("--snapshot") && !args.contains("--exporttest") { NSApp.terminate(nil) }
+        }
+        if let i = args.firstIndex(of: "--addfx"), i + 1 < args.count {
+            let tr = args.firstIndex(of: "--fxtrack").flatMap { $0 + 1 < args.count ? Int(args[$0 + 1]) : nil }
+            print("ADDFX \(EffectsActions.add(named: args[i + 1], toTrack: tr) ? "ok" : "no encontrado") \(args[i + 1]) → \(tr.map { "pista \($0 + 1)" } ?? "master")")
+            if let j = args.firstIndex(of: "--fxvalue"), j + 1 < args.count, let v = Double(args[j + 1]) {
+                session.mutateLight("test") { d in
+                    func set(_ e: inout PLEffect) { for k in e.params.indices { e.params[k] = v } }
+                    if let tr { if !d.tracks[tr].effects.isEmpty { set(&d.tracks[tr].effects[d.tracks[tr].effects.count - 1]) } }
+                    else if !d.master_effects.isEmpty { set(&d.master_effects[d.master_effects.count - 1]) }
+                }
+            }
+            fflush(stdout)
+        }
+        if let i = args.firstIndex(of: "--slicer"), i + 1 < args.count, let n = Int(args[i + 1]) {
+            session.selectedTrack = n
+            viewSongSlicer(nil)
+            if let j = args.firstIndex(of: "--slicerbpm"), j + 1 < args.count, let v = Double(args[j + 1]) { bottom.slicer.canvas.setBPM(v) }
+            let t = session.doc.tracks[n]
+            print("SLICER pista \(n + 1): bar_us=\(t.bar_us) bpm=\(t.bpm) marcadores=\(t.beat_markers_us.count) \(t.beat_markers_us.map { String(format: "%.2f", Double($0) * 1e-6) }.joined(separator: " "))")
+            fflush(stdout)
+        }
+        if args.contains("--effectslist") { viewEffects(nil) }
+        if let i = args.firstIndex(of: "--saveas"), i + 1 < args.count {
+            do { try session.save(to: args[i + 1]); print("SAVEAS ok \(args[i + 1])") } catch { print("SAVEAS error \(error)") }
+            fflush(stdout)
+        }
         // Diagnóstico del tempo por fila: MixMeister8 lista.mmp --dumpbpm
         if args.contains("--dumpbpm") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
@@ -77,6 +117,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                     let mid = it.tempo(at: (it.mixStart + it.mixEnd) / 2)
                     print(String(format: "BPM %2d entrada=%.1f inicio=%.1f medio=%.1f mitad=%.1f fin=%.1f", it.index + 1, it.tempo, it.tempo(at: it.mixStart), sum / Double(max(1, n)), mid, it.tempo(at: it.mixEnd - 0.1)))
                 }
+                let tot = L.total
+                print(String(format: "TOTAL %d:%02d (%.1f s)", Int(tot) / 60, Int(tot) % 60, tot))
                 fflush(stdout)
                 NSApp.terminate(nil)
             }
@@ -96,9 +138,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
     }
 
-    func application(_ sender: NSApplication, openFile filename: String) -> Bool { openFile(filename); return true }
+    func application(_ sender: NSApplication, openFile filename: String) -> Bool {
+        // AppKit pasa como «fichero» cualquier argumento que no empiece por «-» (p. ej. el nombre
+        // de un efecto en --addfx): solo se abren las rutas que existen.
+        guard FileManager.default.fileExists(atPath: filename) else { return false }
+        openFile(filename); return true
+    }
     func applicationShouldTerminateAfterLastWindowClosed(_ s: NSApplication) -> Bool { true }
-    func applicationShouldTerminate(_ s: NSApplication) -> NSApplication.TerminateReply { confirmDiscard() ? .terminateNow : .terminateCancel }
+    /// Arrancada para una prueba (--snapshot, --exporttest…): al acabar se cierra sin preguntar.
+    private let testMode = CommandLine.arguments.contains { ["--snapshot", "--exporttest", "--playtest", "--dumpbpm", "--fxtest", "--saveas"].contains($0) }
+    func applicationShouldTerminate(_ s: NSApplication) -> NSApplication.TerminateReply {
+        testMode || confirmDiscard() ? .terminateNow : .terminateCancel
+    }
     func windowWillReturnUndoManager(_ window: NSWindow) -> UndoManager? { session.undo }
 
     // MARK: Menús
@@ -230,7 +281,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         case "snapToBeat:": item.state = snapOn ? .on : .off
         case let s where s.hasPrefix("snapTo"):
             item.state = snapCodes[s] == snapType ? .on : .off
-        case "viewLibrary:": item.state = library.isHidden ? .off : .on
+        case "viewLibrary:": item.state = !library.isHidden && !library.showingEffects ? .on : .off
+        case "viewEffects:": item.state = !library.isHidden && library.showingEffects ? .on : .off
+        case "addEffectsParameterMarker:":
+            return session.trackedParam != nil && session.trackedParam?.track == session.selectedTrack
+        case "deleteEffectsMarkers:":
+            guard let i = session.selectedTrack, i < session.doc.tracks.count else { return false }
+            return session.doc.tracks[i].markers.contains { $0.type == MarkerKind.effectParam }
         case "viewSongSlicer:": item.state = bottom.tabs.selectedSegment == 0 ? .on : .off
         case "viewEffectsRack:": item.state = bottom.tabs.selectedSegment == 1 ? .on : .off
         case "savePlayList:", "savePlayListAs:": return !session.doc.tracks.isEmpty || session.path != nil
@@ -458,8 +515,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         return best.map { (p.track, $0.0, $0.1) }
     }
 
+    /// Valor nuevo para el marcador de la barra de tempos (doble clic o Edit).
+    func setLaneMarkerValue(_ v: Double) {
+        guard let (ti, li, _) = laneMarker() else { return }
+        session.mutate("Edit Tempo Marker") { d in
+            if case var .marker(mm) = d.tracks[ti].layer[li] { mm.value = v; d.tracks[ti].layer[li] = .marker(mm) }
+        }
+    }
+
+    // MARK: Efectos (marcadores de parámetro desde el menú de la pista)
+
+    /// Add Effects Parameter Marker (E): en el cursor, con el valor actual del parámetro que se
+    /// sigue en el rack.
+    @objc func addEffectsParameterMarker(_ s: Any?) {
+        guard let tp = session.trackedParam, tp.track < session.doc.tracks.count,
+              let item = session.layout.items.first(where: { $0.index == tp.track }),
+              let e = session.doc.tracks[tp.track].effects.first(where: { $0.slot == tp.slot }) else { return }
+        let t = timelinePane.timeline.playhead
+        let seg = item.segments.first { t >= $0.mixStart && t < $0.mixEnd } ?? item.segments.first
+        guard let seg else { return }
+        let src = seg.source(item, at: t)
+        let v = tp.param == 0xFFF ? (e.flags & 1 == 0 ? 1.0 : 0.0) : (tp.param < e.params.count ? e.params[tp.param] : 0.5)
+        session.mutateLight("Add Effects Parameter Marker") { d in
+            d.tracks[tp.track].layer.append(.marker(PLMarker(type: MarkerKind.effectParam, pos_us: Int64(src * 1e6), flag: tp.slot << 12 | UInt32(tp.param), value: v)))
+        }
+    }
+    @objc func deleteEffectsMarkers(_ s: Any?) {
+        guard let i = session.selectedTrack, i < session.doc.tracks.count else { return }
+        session.mutateLight("Delete Effects Markers") { d in
+            d.tracks[i].layer.removeAll { if case let .marker(m) = $0 { return m.type == MarkerKind.effectParam }; return false }
+        }
+    }
+
     @objc func editRulerMarkerItem(_ s: Any?) {
-        guard let (ti, li, m) = laneMarker() else { return }
+        guard let (_, _, m) = laneMarker() else { return }
         let a = NSAlert()
         a.messageText = m.type == MarkerKind.originalTempo ? "Original Tempo Marker" : "Tempo Marker"
         a.informativeText = "BPM:"
@@ -469,9 +558,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         a.addButton(withTitle: "OK"); a.addButton(withTitle: "Cancel")
         a.window.initialFirstResponder = f
         guard a.runModal() == .alertFirstButtonReturn, let v = Double(f.stringValue.replacingOccurrences(of: ",", with: ".")), v >= 20, v <= 300 else { return }
-        session.mutate("Edit Tempo Marker") { d in
-            if case var .marker(mm) = d.tracks[ti].layer[li] { mm.value = v; d.tracks[ti].layer[li] = .marker(mm) }
-        }
+        setLaneMarkerValue(v)
     }
 
     @objc func deleteRulerMarkerItem(_ s: Any?) {
@@ -515,8 +602,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     @objc func zoomOut(_ s: Any?) { timelinePane.zoom(by: 1 / 1.5) }
     @objc func timelineRulerTime(_ s: Any?) { timelinePane.timeline.rulerMeasures = false }
     @objc func timelineRulerMeasuresAndBeats(_ s: Any?) { timelinePane.timeline.rulerMeasures = true }
-    @objc func viewLibrary(_ s: Any?) { library.isHidden.toggle(); topSplit.adjustSubviews() }
-    @objc func viewEffects(_ s: Any?) { library.isHidden = false }
+    @objc func viewLibrary(_ s: Any?) { library.isHidden = false; library.showTab(0); topSplit.adjustSubviews() }
+    @objc func viewEffects(_ s: Any?) { library.isHidden = false; library.showTab(1); topSplit.adjustSubviews() }
     @objc func viewSongSlicer(_ s: Any?) { bottom.tabs.selectedSegment = 0; bottom.changed() }
     @objc func viewEffectsRack(_ s: Any?) { bottom.tabs.selectedSegment = 1; bottom.changed() }
 

@@ -8,6 +8,8 @@ final class LibraryPane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSS
     private let search = NSSearchField()
     private let category = NSPopUpButton()
     private let tabs = NSSegmentedControl(labels: ["Library", "Effects"], trackingMode: .selectOne, target: nil, action: nil)
+    private let effectsList = EffectsListView()
+    private var libraryControls: [NSView] = []
     private var rows: [LibraryItem] = []
     private var visible: [(key: String, width: CGFloat)] = []
     private let empty = label("La biblioteca de MixMeister aparecerá aquí.", size: 12, color: Theme.textDim)
@@ -25,6 +27,8 @@ final class LibraryPane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSS
         tabs.controlSize = .small
         tabs.target = self
         tabs.action = #selector(tabChanged)
+        tabs.setToolTip("Show the Library", forSegment: 0)
+        tabs.setToolTip("Show available Effects", forSegment: 1)
         let add = ToolButton(symbol: "plus.circle", tip: "Add Files To Library", action: NSSelectorFromString("addFilesToLibrary:"))
         category.controlSize = .small
         category.font = Theme.font(11)
@@ -65,6 +69,10 @@ final class LibraryPane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSS
         addSubview(scroll)
         empty.translatesAutoresizingMaskIntoConstraints = false
         addSubview(empty)
+        effectsList.translatesAutoresizingMaskIntoConstraints = false
+        effectsList.isHidden = true
+        addSubview(effectsList)
+        libraryControls = [add, category, search]
 
         NSLayoutConstraint.activate([
             bar.topAnchor.constraint(equalTo: topAnchor), bar.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -75,6 +83,8 @@ final class LibraryPane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSS
             scroll.topAnchor.constraint(equalTo: bar.bottomAnchor), scroll.leadingAnchor.constraint(equalTo: leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: trailingAnchor), scroll.bottomAnchor.constraint(equalTo: bottomAnchor),
             empty.centerXAnchor.constraint(equalTo: scroll.centerXAnchor), empty.centerYAnchor.constraint(equalTo: scroll.centerYAnchor),
+            effectsList.topAnchor.constraint(equalTo: bar.bottomAnchor), effectsList.leadingAnchor.constraint(equalTo: leadingAnchor),
+            effectsList.trailingAnchor.constraint(equalTo: trailingAnchor), effectsList.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
         visible = Columns.layout(prefix: "Catalog", keys: Columns.libraryKeys, defaults: ["Title", "Artist", "Bpm", "Album", "Time", "Key", "KeyCode"])
         rebuildColumns()
@@ -122,7 +132,16 @@ final class LibraryPane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSS
 
     func controlTextDidChange(_ obj: Notification) { filter() }
     @objc func searchTextDidChange(_ sender: Any?) { filter() }
-    @objc private func tabChanged() { /* Effects: lista de efectos (fase de efectos) */ }
+    @objc private func tabChanged() { showTab(tabs.selectedSegment) }
+    /// 0 = Library, 1 = Effects (View › Library / View › Effects).
+    func showTab(_ i: Int) {
+        tabs.selectedSegment = i
+        effectsList.isHidden = i != 1
+        scroll.isHidden = i == 1
+        empty.isHidden = i == 1 || !Session.shared.catalog.items.isEmpty
+        for v in libraryControls { v.isHidden = i == 1 }
+    }
+    var showingEffects: Bool { tabs.selectedSegment == 1 }
 
     var selectedItems: [LibraryItem] { table.selectedRowIndexes.compactMap { $0 < rows.count ? rows[$0] : nil } }
 

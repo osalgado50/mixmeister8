@@ -75,8 +75,17 @@ struct MixLayout {
         self.items = items; self.total = total; self.masterBPM = masterBPM; self.barOrigin = barOrigin
     }
 
+    /// Tempo al que suena la pista sin marcadores de tempo: su marcador de tempo original (lo que
+    /// muestra la columna BPM) o, si no tiene, el tempo de su audio.
     static func ownTempo(_ t: PLTrack) -> Double {
-        t.markers(MarkerKind.originalTempo).first?.value ?? (t.bpm > 0 ? t.bpm : t.original_bpm ?? 120)
+        t.markers(MarkerKind.originalTempo).first?.value ?? audioTempo(t)
+    }
+    /// Tempo real del audio (TRKH; el BPM original del Song Slicer). La velocidad de reproducción es
+    /// tempo de la mezcla / tempo del audio. Comprobado en MixMeister 7.8: Spinning310, pista 2,
+    /// audio a 101,96 con marcador de tempo original 100 suena al 98 % (al pasar el audio a 50 BPM
+    /// en el Song Slicer, la pista se acorta y la mezcla pasa de 47:34 a 47:30).
+    static func audioTempo(_ t: PLTrack) -> Double {
+        t.bpm > 0 ? t.bpm : (t.original_bpm ?? (t.bar_us > 0 ? 240e6 / Double(t.bar_us) : 120))
     }
 
     /// Curva de tempo de la mezcla: interpolación lineal entre puntos (mezcla, BPM).
@@ -120,7 +129,8 @@ struct MixLayout {
 
         for (i, t) in doc.tracks.enumerated() where !t.overlay {
             let segs = t.segments.sorted { $0.src_start_us < $1.src_start_us }
-            let own = ownTempo(t)
+            let own = audioTempo(t)
+            let base = ownTempo(t)
             let marks = t.markers(MarkerKind.tempo)
             let srcStart = Double(segs.first?.src_start_us ?? 0) * us
             let srcEnd = Double(segs.map(\.src_end_us).max() ?? (t.length_us ?? 0)) * us
@@ -133,7 +143,7 @@ struct MixLayout {
             // primero, el valor del primero). Comprobado con Spinning310: 19 de 21 filas iguales al
             // original. Pendiente de observar en MixMeister: el arrastre de tempo en las transiciones
             // beatmix (filas 13 y 21).
-            if marks.isEmpty { item.tempoCurve = { _ in own } }
+            if marks.isEmpty { item.tempoCurve = { _ in base } }
             else if points.isEmpty { let v = marks[0].value; item.tempoCurve = { _ in v } }
             else {
                 let mine = points.filter { p in tp0[i]?.contains { abs($0 - p.0) < 1e-6 } ?? false }
@@ -180,7 +190,7 @@ struct MixLayout {
         let masterCurve: (Double) -> Double = points.isEmpty ? { _ in master > 0 ? master : 120 } : global
         for (i, t) in doc.tracks.enumerated() where t.overlay {
             let segs = t.segments
-            let own = ownTempo(t)
+            let own = audioTempo(t)
             var item = Item(index: i, strip: i % strips, overlay: true, own: own)
             item.tempoCurve = masterCurve
             let bar = 240 / max(1, masterCurve(origin))

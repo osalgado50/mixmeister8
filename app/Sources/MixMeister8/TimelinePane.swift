@@ -222,10 +222,11 @@ final class MeterView: FillView {
     }
 }
 
-/// Panel inferior: Song Slicer / Effects Rack (pestañas, como en el original) y Master Output.
+/// Panel inferior: Song Slicer / Effects Rack (pestañas, como en el original).
 final class BottomPane: NSView {
     let tabs = NSSegmentedControl(labels: ["Song Slicer", "Effects Rack"], trackingMode: .selectOne, target: nil, action: nil)
-    private let info = label("", size: 11, color: Theme.textDim)
+    let slicer = SongSlicerView()
+    let rack = EffectsRackView()
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -234,51 +235,36 @@ final class BottomPane: NSView {
         let bar = FillView(Theme.header)
         bar.bottomLine = Theme.gridStrong
         bar.translatesAutoresizingMaskIntoConstraints = false
-        tabs.selectedSegment = 1
+        tabs.selectedSegment = UserDefaults.standard.object(forKey: "MM8 Bottom Tab") as? Int ?? 1
         tabs.controlSize = .small
         tabs.target = self
         tabs.action = #selector(changed)
         tabs.translatesAutoresizingMaskIntoConstraints = false
+        tabs.setToolTip("Show the Song Slicer", forSegment: 0)
+        tabs.setToolTip("Show the Effects Rack", forSegment: 1)
         bar.addSubview(tabs)
         addSubview(bar)
-        let master = FillView(Theme.panelRaised)
-        master.translatesAutoresizingMaskIntoConstraints = false
-        let mt = label("Master Output", size: 11, weight: .semibold)
-        mt.translatesAutoresizingMaskIntoConstraints = false
-        master.addSubview(mt)
-        addSubview(master)
-        info.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(info)
+        for v in [slicer, rack] as [NSView] {
+            v.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(v)
+            NSLayoutConstraint.activate([
+                v.topAnchor.constraint(equalTo: bar.bottomAnchor), v.bottomAnchor.constraint(equalTo: bottomAnchor),
+                v.leadingAnchor.constraint(equalTo: leadingAnchor), v.trailingAnchor.constraint(equalTo: trailingAnchor),
+            ])
+        }
         NSLayoutConstraint.activate([
             bar.topAnchor.constraint(equalTo: topAnchor), bar.leadingAnchor.constraint(equalTo: leadingAnchor),
-            bar.trailingAnchor.constraint(equalTo: trailingAnchor), bar.heightAnchor.constraint(equalToConstant: 28),
-            tabs.leadingAnchor.constraint(equalTo: bar.leadingAnchor, constant: 10), tabs.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
-            master.topAnchor.constraint(equalTo: bar.bottomAnchor), master.leadingAnchor.constraint(equalTo: leadingAnchor),
-            master.bottomAnchor.constraint(equalTo: bottomAnchor), master.widthAnchor.constraint(equalToConstant: 150),
-            mt.topAnchor.constraint(equalTo: master.topAnchor, constant: 10), mt.leadingAnchor.constraint(equalTo: master.leadingAnchor, constant: 12),
-            info.leadingAnchor.constraint(equalTo: master.trailingAnchor, constant: 16), info.topAnchor.constraint(equalTo: bar.bottomAnchor, constant: 12),
-            info.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -16),
+            bar.trailingAnchor.constraint(equalTo: trailingAnchor), bar.heightAnchor.constraint(equalToConstant: 24),
+            tabs.leadingAnchor.constraint(equalTo: bar.leadingAnchor, constant: 8), tabs.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
         ])
-        NotificationCenter.default.addObserver(self, selector: #selector(changed), name: .selectionChanged, object: nil)
-        NotificationCenter.default.addObserver(self, selector: #selector(changed), name: .playlistChanged, object: nil)
         changed()
     }
     required init?(coder: NSCoder) { fatalError() }
 
     @objc func changed() {
-        let s = Session.shared
-        guard let i = s.selectedTrack, i < s.doc.tracks.count else {
-            info.stringValue = tabs.selectedSegment == 0 ? "Song Slicer: selecciona una pista para ver sus compases." :
-                "Effects Rack: efectos del master — \(s.doc.master_effects.map(\.name).joined(separator: ", ").isEmpty ? "ninguno" : s.doc.master_effects.map(\.name).joined(separator: ", "))"
-            return
-        }
-        let t = s.doc.tracks[i]
-        if tabs.selectedSegment == 0 {
-            info.stringValue = String(format: "Song Slicer · %d. %@ · %.3f BPM (original %.3f) · %d compases marcados · tono %+.1f",
-                                      i + 1, t.title, t.bpm, t.original_bpm ?? 0, t.beat_markers_us.count, t.key_semitones)
-        } else {
-            let fx = t.effects.map(\.name).joined(separator: ", ")
-            info.stringValue = "Effects Rack · \(i + 1). \(t.title) · " + (fx.isEmpty ? "sin efectos" : fx)
-        }
+        slicer.isHidden = tabs.selectedSegment != 0
+        rack.isHidden = tabs.selectedSegment != 1
+        UserDefaults.standard.set(tabs.selectedSegment, forKey: "MM8 Bottom Tab")
+        if tabs.selectedSegment == 0 { slicer.reload() } else { rack.reload() }
     }
 }
