@@ -73,8 +73,31 @@ exportación en paralelo = render seguido · normalización a −14 y −9 LUFS 
 reproducción en directo · grabación · copia de recuperación tras cierre brusco · exportación de la
 lista grande (< 40 s) · ordenar por flujo · Find Similar · CPU en directo (< 60 %).
 
+## Tercera tanda (29-10-2026): motor de BPM y análisis en paralelo
+
+Medido contra los `.mxm` de MixMeister en las **4175 pistas** de SWAT DJ's y contra GiantSteps
+(detalle en `engine/docs/VALIDACION.md`).
+
+| | Antes (20-10) | Ahora |
+|---|---|---|
+| Mismo nivel métrico (BPM) que MixMeister | 96,8 % | **98,0 %** |
+| Fase igual a MixMeister (< 0,1 tiempos) | 77,3 % | **89,5 %** |
+| Compás igual (con la fase bien) | 82,8 % | **87,2 %** |
+| BPM, fase y compás bien a la vez | 62 % | **76,4 %** |
+| Tiempo de análisis por pista | 3,0 s | **2,1 s** (24 a la vez) |
+| Añadir 1225 ficheros a la biblioteca (Add Files) | uno a uno | **53 s**, todos con BPM y tonalidad |
+
+- **Mismo «reloj» que MixMeister**: el audio se coloca con el mismo adelanto que el decodificador
+  del original (MP3 con o sin cabecera LAME/Xing, M4A, WAV); la reproducción, la vista previa
+  del Song Slicer y la exportación usan ese mismo desfase.
+- **Rango de MixMeister**: tempos plegados a 80-166 BPM, como el original (DnB a 87).
+- **Fase a cuartos de tiempo y compás** con reglas reajustadas sobre 3400-3500 pistas reales.
+- **Análisis en paralelo y en caché**: Add Files analiza con todos los núcleos menos dos, con
+  progreso y botón de parar; lo analizado no se repite (caché por fichero y versión del motor).
+  Las cifras de la app coinciden con las del motor en línea de órdenes (comprobado en GiantSteps).
+
 ## Siguiente (propuesto)
 
-1. **Análisis de BPM/tonalidad en paralelo** al añadir muchos ficheros a la biblioteca.
+1. ~~Análisis de BPM/tonalidad en paralelo~~ — hecho (tercera tanda).
 2. **MP3** al exportar cuando haya un codificador libre de licencias en macOS.
-3. **Efecto en parte de una pista** y **Save as Tweak** (pendientes de la copia del original).
+3. ~~Efecto en parte de una pista y Save as Tweak~~ — hechos y comprobados contra MixMeister 7.8.

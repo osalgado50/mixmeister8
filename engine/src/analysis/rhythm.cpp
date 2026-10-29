@@ -19,6 +19,8 @@ constexpr double kTwoPi = 2.0 * std::numbers::pi;
 /// Retardo del pico de flujo de graves respecto al ataque, en fracción de ventana.
 /// Calibrado igual que kOnsetLag (ver onset_envelope).
 constexpr double kLowOnsetLag = 0.38;
+/// Margen con el que la regla de cuartos de tiempo cambia la fase elegida (validación cruzada).
+constexpr double kQuarterMargin = 0.25;
 
 void normalize_max(std::vector<float>& v) {
     const float m = v.empty() ? 0.0f : *std::max_element(v.begin(), v.end());
@@ -157,6 +159,26 @@ double phase_score(const OnsetEnvelope& e, double t0, double P) {
     return s;
 }
 
+
+double quarter_score(const OnsetEnvelope& e, double t0, double P) {
+    // Regresión softmax sobre las 4 posiciones a un cuarto de tiempo (0 = la de MixMeister),
+    // con los 8 rasgos de phase_features y el pulso de bombo (√graves·banda). Ajustada con
+    // `mmn phasediag4` sobre 3412 pistas reales al mismo nivel que MixMeister. Con margen 0,25,
+    // validación cruzada 89,4 % (la rejilla sin esta regla: 86,6 %). Lectura: manda el bombo;
+    // ataque en graves y medios a favor, caída lenta en subgraves en contra (bajo sostenido).
+    // Rehacer con: tools/ajustar_fase4.py
+    static constexpr std::array<double, 9> w{1.6652, 2.9040, 2.4094, 0.4949, -0.8188, 1.7893, -1.1165, 1.3350, 5.7210};
+    const auto f = phase_features(e, t0, P);
+    double s = 0;
+    for (int k = 0; k < 8; ++k) s += w[k] * f[k];
+    double kick = 0;
+    long n = 0;
+    for (double t = std::fmod(t0, P); t + 0.2 < e.duration(); t += P, ++n) {
+        const double lo = interp(e.low, (t - e.low_offset_s) / e.hop_s), fu = interp(e.full, (t - e.offset_s) / e.hop_s);
+        kick += std::sqrt(std::max(0.0, lo * fu));
+    }
+    return s + w[8] * (n ? kick / static_cast<double>(n) : 0.0);
+}
 
 std::array<std::array<double, kBarFeatures>, 4> bar_features(const OnsetEnvelope& e, double b0, double P,
                                                              long first_sounding) {
@@ -389,6 +411,23 @@ BeatGrid fit_grid(const OnsetEnvelope& e, double bpm0) {
     // 4) Tiempo o contratiempo: decide la regla aprendida comparando las dos rejillas.
     const double other = std::fmod(b0 + 0.5 * P, P);
     if (mmn::phase_score(e, other, P) > mmn::phase_score(e, b0, P)) b0 = other;
+    // 5) Cuartos de tiempo: las cuatro rejillas a P/4 compiten con la regla de cuartos; solo se
+    //    cambia si otra gana por margen claro. Después, el ataque se afina en ±P/12.
+    {
+        std::array<double, 4> sc{};
+        for (int j = 0; j < 4; ++j) sc[j] = mmn::quarter_score(e, std::fmod(b0 + j * 0.25 * P, P), P);
+        const int best = static_cast<int>(std::max_element(sc.begin(), sc.end()) - sc.begin());
+        if (best != 0 && sc[best] - sc[0] > kQuarterMargin) {
+            const double c0 = std::fmod(b0 + best * 0.25 * P, P);
+            double bb = c0, bsc = -1;
+            for (double d = -P / 12; d <= P / 12; d += e.hop_s / 4) {
+                const double c = std::fmod(c0 + d + P, P);
+                const double s = phase_score(c);
+                if (s > bsc) bsc = s, bb = c;
+            }
+            b0 = bb;
+        }
+    }
     g.first_beat_s = b0;
     return g;
 }
@@ -443,19 +482,18 @@ BeatGrid refine_grid(const OnsetEnvelope& e, double bpm0) {
     }
 
     // 6) Compás por el sonido, con la convención como punto de partida. Regresión softmax
-    //    sobre 3 rasgos por posición: ataque en graves (90-250 Hz), cambio armónico y novedad
-    //    entre compases. Ajustada con `mmn bardiag` sobre 178 pistas reales con su .mxm. Solo
-    //    se aparta de la convención si el sonido la supera por un margen claro.
-    //    Validación cruzada en la biblioteca: 78,6 % (convención: 60 %). Demos no vistas: 9/11
-    //    (convención: 11/11). Rehacer con: tools/ajustar_compas.py
+    //    sobre 7 rasgos por posición: ataque en 4 bandas, cambio armónico, novedad y salto de
+    //    nivel entre compases. Ajustada con `mmn bardiag` sobre 3492 pistas reales con su .mxm
+    //    (las que están en fase). Solo se aparta de la convención si el sonido la supera por un
+    //    margen claro. Validación cruzada: 87,0 % (convención sola: 73,3 %; la regla anterior,
+    //    de 3 rasgos y 178 pistas: 83,9 %). Rehacer con: tools/ajustar_compas.py
     {
-        static constexpr std::array<double, 3> w{3.9178, 0.1858, 1.8700};
-        static constexpr std::array<std::size_t, 3> feat{1, 4, 5};
-        constexpr double kMargin = 1.5;
+        static constexpr std::array<double, 7> w{1.0281, 2.0642, 1.6384, -0.9658, 0.0170, 3.0999, -46.3705};
+        constexpr double kMargin = 1.0;
         const auto f = bar_features(e, b0, P, g.first_sounding_beat);
         std::array<double, 4> sc{};
         for (int j = 0; j < 4; ++j)
-            for (std::size_t q = 0; q < feat.size(); ++q) sc[j] += w[q] * f[j][feat[q]];
+            for (std::size_t q = 0; q < w.size(); ++q) sc[j] += w[q] * f[j][q];
         const int best = static_cast<int>(std::max_element(sc.begin(), sc.end()) - sc.begin());
         if (sc[best] - sc[g.downbeat] > kMargin) g.downbeat = best;
     }
@@ -526,6 +564,10 @@ RhythmAnalysis analyze_rhythm(std::span<const float> mono, int sr, const TempoOp
         double sc = 0;
         for (std::size_t q = 0; q < kLevelFeatures; ++q) sc += w[q] * c.f[q];
         if (sc > best_score) best_score = sc, best_bpm = c.bpm;
+    }
+    if (opt.fold_max_bpm > 2 * opt.fold_min_bpm && best_bpm > 0) {
+        while (best_bpm >= opt.fold_max_bpm) best_bpm /= 2;
+        while (best_bpm < opt.fold_min_bpm) best_bpm *= 2;
     }
     a.grid = refine_grid(a.env, best_bpm);
     return a;

@@ -60,8 +60,13 @@ TEST_CASE("Tempo y fase exactos en un groove limpio") {
         const double first = 0.137;
         const auto x = groove(bpm, first, 60, sr);
         const auto a = analyze_rhythm(x, sr);
+        // Rango de MixMeister: 174 se lee a 87 (el mismo pulso, un tiempo de cada dos).
+        const double want = bpm >= 166 ? bpm / 2 : bpm;
         INFO("bpm real " << bpm << ", medido " << a.grid.bpm);
-        CHECK(std::abs(a.grid.bpm - bpm) < 0.01);
+        CHECK(std::abs(a.grid.bpm - want) < 0.01);
+        TempoOptions sin_plegar;
+        sin_plegar.fold_max_bpm = 0;
+        CHECK(std::abs(analyze_rhythm(x, sr, sin_plegar).grid.bpm - bpm) < 0.01);
         // fase: el primer tiempo medido cae sobre un tiempo real (módulo periodo)
         const double P = 60 / bpm;
         double d = std::fmod(a.grid.first_beat_s - first + 10 * P, P);

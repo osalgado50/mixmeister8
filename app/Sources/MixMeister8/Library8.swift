@@ -13,7 +13,7 @@ import CryptoKit
 /// Caché en disco del análisis del motor, por fichero (ruta, tamaño, fecha) y versión del análisis.
 enum AnalysisCache {
     /// Subir al cambiar el motor de análisis (las cifras guardadas dejan de valer).
-    static let version = "a3"
+    static let version = "a4"
     private static let dir = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Caches/es.mixmeister8/analysis")
     private static func url(_ path: String) -> URL? {

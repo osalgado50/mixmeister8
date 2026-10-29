@@ -53,6 +53,8 @@ Result run(const std::string& path) {
     TempoOptions opt;
     if (const char* c = std::getenv("MMN_PRIOR_CENTER")) opt.prior_center_bpm = std::atof(c);
     if (const char* c = std::getenv("MMN_PRIOR_SIGMA")) opt.prior_sigma_oct = std::atof(c);
+    // MMN_FOLD=0: tempo sin plegar al rango de MixMeister (para GiantSteps, con DnB a 174).
+    if (const char* c = std::getenv("MMN_FOLD"); c && !std::atoi(c)) opt.fold_max_bpm = 0;
     r.a = analyze_rhythm(mono, b.sample_rate, opt);
     r.elapsed_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
     return r;
@@ -176,7 +178,7 @@ int cmd_phasediag(const char* audio, const char* mxm, bool quarters = false) {
     auto at = [&](double t, std::size_t band, bool flux) {
         const double x = (t - e.frame_offset_s) / e.hop_s;
         const auto i = static_cast<long>(std::floor(x));
-        if (i < 1 || i + 1 >= static_cast<long>(frames)) return 0.0;
+        if (i < 2 || i + 1 >= static_cast<long>(frames)) return 0.0;  // el flujo lee f − 1 desde i − 1
         auto B = [&](long f) { return static_cast<double>(e.bands[static_cast<std::size_t>(f) * nb + band]); };
         if (flux) {  // máximo del flujo positivo en ±1 frame
             double best = 0;

@@ -60,8 +60,24 @@ def main(path):
             w = fit(X[tr][:, :, subset], y[tr])
             a.append(acc(X[te][:, :, subset], y[te], w))
         print(f"{label}: validación cruzada 10 partes {np.mean(a):.3f} ± {np.std(a):.3f}")
-    w = fit(X, y)
-    print("pesos: {" + ", ".join(f"{v:.4f}" for v in w) + "}")
+    # La regla del motor: 7 rasgos (sin «primer tiempo») y solo se aparta de la convención si
+    # otra posición gana por `margen`.
+    conv = np.argmax(X[:, :, 7], 1)
+    def rule(Xs, w, c, margin):
+        s = Xs[:, :, :7] @ w
+        b = s.argmax(1)
+        i = np.arange(len(b))
+        return np.where(s[i, b] - s[i, c] > margin, b, c)
+    for margin in (0.5, 1.0, 1.5):
+        hit = np.zeros(len(y), bool)
+        for k in range(10):
+            te = idx[k::10]
+            tr = np.setdiff1d(idx, te)
+            w = fit(X[tr][:, :, :7], y[tr])
+            hit[te] = rule(X[te], w, conv[te], margin) == y[te]
+        print(f"regla del motor (7 rasgos + convención), margen {margin}: validación cruzada {hit.mean():.3f}")
+    w = fit(X[:, :, :7], y)
+    print("pesos del motor: {" + ", ".join(f"{v:.4f}" for v in w) + "}")
     for n, v in zip(NAMES, w):
         print(f"  {n:16s} {v:+.4f}")
 

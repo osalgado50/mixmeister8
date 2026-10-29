@@ -35,6 +35,11 @@ struct TempoOptions {
     double min_bpm = 60, max_bpm = 200;
     double prior_center_bpm = 120;   ///< ya no lo usa el nivel métrico (regla aprendida); se conserva para quien lo quiera
     double prior_sigma_oct = 0.5;    ///< anchura del prior, en octavas
+    /// Rango de lectura de MixMeister: el tempo final se pliega por octavas a [fold_min, fold_max).
+    /// En 4175 pistas con su .mxm, MixMeister nunca da menos de 82 BPM y solo 7 pasan de 162
+    /// (un DnB a 174 lo lee a 87). Plegar sube el acierto de nivel del 96,9 % al 98,0 %.
+    /// fold_max_bpm = 0 lo desactiva (tempo "real" sin plegar).
+    double fold_min_bpm = 80, fold_max_bpm = 166;
 };
 
 /// Candidatos de tempo global ordenados por `weighted`, descendente.
@@ -59,6 +64,9 @@ std::array<double, 8> phase_features(const OnsetEnvelope& env, double t0, double
 
 /// Puntuación tiempo-frente-a-contratiempo: positiva si la rejilla en t0 está en el tiempo.
 double phase_score(const OnsetEnvelope& env, double t0, double period);
+
+/// Puntuación de una rejilla frente a las otras tres a un cuarto de tiempo (se elige la mayor).
+double quarter_score(const OnsetEnvelope& env, double t0, double period);
 
 /// Rasgos de compás: para cada posición j = 0..3 (tiempo k con k % 4 == j en la rejilla),
 /// medias centradas entre posiciones de: [0-3] ataque en subgraves, graves, medios, agudos;

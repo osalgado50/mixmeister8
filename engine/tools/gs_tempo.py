@@ -6,14 +6,17 @@ ann = {l.split('\t')[0]: float(l.split('\t')[1]) for l in open(sys.argv[2]) if '
 res = {}
 for line in open(sys.argv[1]):
     line = line.strip().rstrip(',')
-    if not line.startswith('['): continue
-    for r in json.loads(line):
+    if line.startswith('{'):   # una pista por línea (salida de `mmn analyze --json`)
+        r = json.loads(line)
         res[r['file'].rsplit('.', 1)[0]] = r
+    elif line.startswith('[{'):
+        for r in json.loads(line):
+            res[r['file'].rsplit('.', 1)[0]] = r
 n = a1 = a2 = 0
 kinds = collections.Counter()
 fallos = []
 for k, t in ann.items():
-    if k not in res: continue
+    if k not in res or t <= 0: continue
     n += 1
     e = res[k]['bpm']
     ok1 = abs(e / t - 1) <= 0.04

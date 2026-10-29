@@ -32,7 +32,7 @@ Leyenda: ✅ hecho en mm2027 · 🟡 parcial · ❌ falta · ⛔ no se replica
 | Función | Acción en la interfaz | Clase original | mm2027 |
 |---|---|---|---|
 | Añadir ficheros / carpetas | `addFilesToLibrary:` (AddMusicFilesToLibraryDlg) | AddMusicFilesController, MmLibrary | 🟡 lee el catálogo existente y analiza |
-| Análisis BPM, rejilla, tonalidad, estructura | cola `ProfileWorkItem` | MmEngineManager, CProfileBuilder | ✅ validado (96,7 % nivel métrico) |
+| Análisis BPM, rejilla, tonalidad, estructura | cola `ProfileWorkItem` | MmEngineManager, CProfileBuilder | ✅ validado: 98,0 % nivel, 89,5 % fase, 87,2 % compás frente a MixMeister (4175 pistas) |
 | Columnas elegibles (21) y orden | `toggleTitle:` … `toggleUser2:` | CatalogDataSource | ✅ |
 | Buscar | `searchTextDidChange:` | LibraryController | ✅ |
 | Escuchar en la biblioteca | `catPreviewPlay:` / `catPreviewStop:` | LibraryController | 🟡 suena la pista seleccionada |
