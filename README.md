@@ -1,6 +1,9 @@
-# MixMeister 8 (proyecto mmstudio-next)
+# MixMeister 8
 
 Continuación de **MixMeister Fusion 7.8** con la misma operativa y los mismos ficheros, imagen renovada y versión 8 (plan y estado: `docs/03-MIXMEISTER8.md`). Reconstrucción nativa en macOS (Intel y Apple
+
+Repositorio: https://github.com/osalgado50/mixmeister8 (antes `mmstudio-next`; en el Mac la
+carpeta de trabajo sigue siendo `~/dev/mm8/mmstudio-next`).
 Silicon), con un motor de análisis y mezcla escrito desde cero y validado contra lo que el
 propio MixMeister dejó en tu biblioteca.
 
