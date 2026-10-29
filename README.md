@@ -1,11 +1,11 @@
 # MixMeister 8
 
 Continuación de **MixMeister Fusion 7.8** con la misma operativa y los mismos ficheros, imagen renovada y versión 8 (plan y estado: `docs/03-MIXMEISTER8.md`). Reconstrucción nativa en macOS (Intel y Apple
+Silicon), con un motor de análisis y mezcla escrito desde cero y validado contra lo que el
+propio MixMeister dejó en tu biblioteca.
 
 Repositorio: https://github.com/osalgado50/mixmeister8 (antes `mmstudio-next`; en el Mac la
 carpeta de trabajo sigue siendo `~/dev/mm8/mmstudio-next`).
-Silicon), con un motor de análisis y mezcla escrito desde cero y validado contra lo que el
-propio MixMeister dejó en tu biblioteca.
 
 MixMeister está en *end-of-life*: el binario es solo Intel y **macOS 27 es la última versión
 con Rosetta 2 para apps Intel**.
