@@ -109,7 +109,7 @@ final class MixGraph {
             for m in t.markers where m.type == MarkerKind.effectParam && m.flag >> 12 == s.slot {
                 byParam[Int(m.flag & 0xFFF), default: []].append((Double(m.pos_us) * 1e-6, m.value))
             }
-            s.auto = byParam.map { ($0.key, $0.value.sorted { $0.t < $1.t }) }
+            s.auto = byParam.map { ($0.key, $0.value.stableSorted { $0.t < $1.t }) }
         }
     }
 
@@ -166,7 +166,7 @@ final class MixGraph {
                   let file = try? AVAudioFile(forReading: URL(fileURLWithPath: path)) else { return nil }
             let t = doc.tracks[item.index]
             func env(_ kinds: [UInt32]) -> [(t: Double, db: Double)] {
-                t.markers.filter { kinds.contains($0.type) }.map { (Double($0.pos_us) * 1e-6, $0.value) }.sorted { $0.t < $1.t }
+                t.markers.filter { kinds.contains($0.type) }.map { (Double($0.pos_us) * 1e-6, $0.value) }.stableSorted { $0.t < $1.t }
             }
             var c = Chain(index: item.index, file: file, item: item,
                           volume: env([MarkerKind.volume, MarkerKind.autoVolume, MarkerKind.autoVolumeIn]),

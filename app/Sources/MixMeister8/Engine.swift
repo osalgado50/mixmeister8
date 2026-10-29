@@ -208,3 +208,11 @@ enum Engine {
         return try JSONDecoder().decode(TrackAnalysis.self, from: Data(String(cString: s).utf8))
     }
 }
+
+extension Sequence {
+    /// Orden estable: con dos elementos iguales conserva el orden original. Los marcadores en el mismo
+    /// instante (p. ej. Enable 0 y 1 al principio de un tramo con efecto) dependen de ello.
+    func stableSorted(by less: (Element, Element) -> Bool) -> [Element] {
+        enumerated().sorted { less($0.element, $1.element) || (!less($1.element, $0.element) && $0.offset < $1.offset) }.map(\.element)
+    }
+}

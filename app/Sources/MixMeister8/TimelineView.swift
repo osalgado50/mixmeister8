@@ -197,6 +197,15 @@ final class TimelineView: NSView {
         (name as NSString).draw(at: NSPoint(x: full.minX + 5, y: full.minY + 1),
                                 withAttributes: [.font: Theme.font(10, .medium), .foregroundColor: selected ? Theme.clipSelectedInk : Theme.clipText])
 
+        // Tramo resaltado (arrastrando sobre la pista)
+        if let r = rangeSel, r.track == item.index {
+            let hr = NSRect(x: x(r.a), y: full.minY + header, width: x(r.b) - x(r.a), height: full.height - header)
+            Theme.accent.withAlphaComponent(0.28).setFill(); hr.fill(using: .sourceOver)
+            Theme.accent.setFill()
+            NSRect(x: hr.minX, y: hr.minY, width: 1, height: hr.height).fill()
+            NSRect(x: hr.maxX - 1, y: hr.minY, width: 1, height: hr.height).fill()
+        }
+
         // Bucles: sombreado entre inicio y fin
         let starts = t.markers(MarkerKind.loopStart).map { item.toMix(Double($0.pos_us) * 1e-6) }.sorted()
         let ends = t.markers(MarkerKind.loopEnd).map { item.toMix(Double($0.pos_us) * 1e-6) }.sorted()
@@ -208,10 +217,10 @@ final class TimelineView: NSView {
         // Envolventes: volumen (incluidos los automáticos de la transición) y EQ
         let bodyTop = full.minY + header + 2, bodyH = full.height - header - 4
         func yFor(db: Double, range: Double) -> CGFloat { bodyTop + bodyH * CGFloat(min(1, max(0, -db / range))) }
-        let vol = t.markers.filter { [MarkerKind.volume, MarkerKind.autoVolume, MarkerKind.autoVolumeIn].contains($0.type) }.sorted { $0.pos_us < $1.pos_us }
+        let vol = t.markers.filter { [MarkerKind.volume, MarkerKind.autoVolume, MarkerKind.autoVolumeIn].contains($0.type) }.stableSorted { $0.pos_us < $1.pos_us }
         drawEnvelope(vol.map { (item.toMix(Double($0.pos_us) * 1e-6), yFor(db: $0.value, range: 50)) }, color: Theme.volume, full: full, baseline: yFor(db: 0, range: 50))
         for (kind, color) in [(MarkerKind.bass, Theme.bass), (MarkerKind.mid, Theme.mid), (MarkerKind.treble, Theme.treble)] {
-            let m = t.markers(kind).sorted { $0.pos_us < $1.pos_us }
+            let m = t.markers(kind).stableSorted { $0.pos_us < $1.pos_us }
             if m.isEmpty { continue }
             drawEnvelope(m.map { (item.toMix(Double($0.pos_us) * 1e-6), bodyTop + bodyH / 2 + CGFloat(-$0.value / 50) * bodyH / 2) }, color: color, full: full, baseline: nil)
         }
@@ -219,7 +228,7 @@ final class TimelineView: NSView {
         // Automatización del parámetro de efecto elegido en el rack (Effects Parameter Markers)
         if let tp = s.trackedParam, tp.track == item.index {
             let key = tp.slot << 12 | UInt32(tp.param)
-            let m = t.markers.filter { $0.type == MarkerKind.effectParam && $0.flag == key }.sorted { $0.pos_us < $1.pos_us }
+            let m = t.markers.filter { $0.type == MarkerKind.effectParam && $0.flag == key }.stableSorted { $0.pos_us < $1.pos_us }
             drawEnvelope(m.map { (item.toMix(Double($0.pos_us) * 1e-6), bodyTop + bodyH * CGFloat(1 - min(1, max(0, $0.value)))) },
                          color: Theme.effect, full: full, baseline: nil)
         }
@@ -298,15 +307,35 @@ final class TimelineView: NSView {
     override func mouseDown(with e: NSEvent) {
         window?.makeFirstResponder(self)
         let p = convert(e.locationInWindow, from: nil)
+        dragFrom = nil
+        if rangeSel != nil { rangeSel = nil; needsDisplay = true }
         if p.y >= laneTop {
             laneClick = (max(0, time(p.x)), lanePoint(at: p.x))
             if e.clickCount == 2, let pt = laneClick.point { beginLaneEdit(pt); return }
         } else if p.y >= Self.rulerHeight {
             let hit = trackRects.last { $0.rect.contains(p) }
             Session.shared.selectedTrack = hit?.index
+            if let hit { dragFrom = (hit.index, p.x) }
         }
         playhead = max(0, time(p.x))
         Player.shared.seek(playhead)
+    }
+
+    // MARK: Resaltar una parte de la pista arrastrando sobre ella (para soltar ahí un efecto)
+
+    /// Tramo resaltado: pista e instantes de la mezcla (ajustados a la rejilla de Snap To).
+    var rangeSel: (track: Int, a: Double, b: Double)? {
+        didSet { NotificationCenter.default.post(name: .selectionChanged, object: nil) }
+    }
+    private var dragFrom: (track: Int, x: CGFloat)?
+    override func mouseDragged(with e: NSEvent) {
+        guard let d = dragFrom else { return }
+        let p = convert(e.locationInWindow, from: nil)
+        guard abs(p.x - d.x) > 3, let r = trackRects.last(where: { $0.index == d.track })?.rect else { return }
+        let snap: (Double) -> Double = { (NSApp.delegate as? AppDelegate)?.snap($0) ?? $0 }
+        let lo = max(time(r.minX), snap(time(min(d.x, p.x)))), hi = min(time(r.maxX), snap(time(max(d.x, p.x))))
+        rangeSel = hi > lo ? (d.track, lo, hi) : nil
+        needsDisplay = true
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
@@ -362,6 +391,10 @@ final class TimelineView: NSView {
         guard let name = s.draggingPasteboard.string(forType: .mm8Effect) else { return false }
         let p = convert(s.draggingLocation, from: nil)
         let hit = p.y >= Self.rulerHeight && p.y < laneTop ? trackRects.last { $0.rect.contains(p) }?.index : nil
+        // Sobre el tramo resaltado de esa pista: el efecto solo suena ahí.
+        if let r = rangeSel, r.track == hit, time(p.x) >= r.a, time(p.x) <= r.b {
+            return EffectsActions.add(named: name, toTrack: hit, range: (r.a, r.b))
+        }
         return EffectsActions.add(named: name, toTrack: hit)
     }
 

@@ -879,6 +879,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private let snapCodes = ["snapTo8Measures:": 7, "snapTo4Measures:": 6, "snapTo2Measures:": 5, "snapTo1Measure:": 4,
                              "snapToHalfNote:": 3, "snapToQuarterNote:": 1, "snapToEighthNote:": 2, "snapToSixteenthNote:": 8]
     @objc func snapToBeat(_ s: Any?) { snapOn.toggle(); UserDefaults.standard.set(snapOn, forKey: "Snap To Beat") }
+    /// Ajusta un instante de la mezcla a la rejilla elegida en Tools › Snap To (si Snap To Beat está activo).
+    func snap(_ t: Double) -> Double {
+        let L = session.layout
+        guard snapOn, L.masterBPM > 0 else { return t }
+        let beats: [Int: Double] = [7: 32, 6: 16, 5: 8, 4: 4, 3: 2, 1: 1, 2: 0.5, 8: 0.25]
+        let step = (beats[snapType] ?? 1) * 60 / L.masterBPM
+        return L.barOrigin + ((t - L.barOrigin) / step).rounded() * step
+    }
     private func setSnap(_ sel: String) { snapType = snapCodes[sel] ?? 1; UserDefaults.standard.set(snapType, forKey: "Snap Position Type") }
     @objc func snapTo8Measures(_ s: Any?) { setSnap("snapTo8Measures:") }
     @objc func snapTo4Measures(_ s: Any?) { setSnap("snapTo4Measures:") }

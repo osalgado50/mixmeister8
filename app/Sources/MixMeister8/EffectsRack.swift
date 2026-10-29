@@ -464,12 +464,27 @@ final class RackContent: NSView {
 enum EffectsActions {
     /// Añade un efecto a una pista (o al master si `toTrack` es nil) y enseña el rack.
     @discardableResult
-    static func add(named listName: String, toTrack t: Int?) -> Bool {
+    /// `range`: tramo de la mezcla (segundos) si el efecto se suelta sobre una parte resaltada de la pista.
+    /// Como MixMeister 7.8: el efecto se añade desactivado (flags bit 0) y cuatro Effects Parameter
+    /// Markers de Enable/Bypass lo encienden solo en el tramo — 0 y 1 al principio, 1 y 0 al final
+    /// (comprobado en el original, experimento exp-tramo.mmp).
+    static func add(named listName: String, toTrack t: Int?, range: (Double, Double)? = nil) -> Bool {
         guard let type = FxCatalog.all.first(where: { $0.listName == listName }) else { return false }
         let s = Session.shared
-        let e = FxCatalog.newEffect(type, doc: s.doc)
-        s.mutate("Add Effect") { d in
-            if let t, t < d.tracks.count { d.tracks[t].effects.append(e) } else { d.master_effects.append(e) }
+        var e = FxCatalog.newEffect(type, doc: s.doc)
+        var marks: [PLMarker] = []
+        if let t, let (a, b) = range, b > a, let item = s.layout.items.first(where: { $0.index == t }), !item.segments.isEmpty {
+            func src(_ m: Double) -> Int64 {
+                let seg = item.segments.first { m >= $0.mixStart && m <= $0.mixEnd } ?? item.segments[0]
+                return Int64((seg.source(item, at: m) * 1e6).rounded())
+            }
+            let flag = UInt32(e.slot) << 12 | 0xFFF
+            let pa = src(max(a, item.mixStart)), pb = src(min(b, item.mixEnd))
+            marks = [(pa, 0.0), (pa, 1.0), (pb, 1.0), (pb, 0.0)].map { PLMarker(type: MarkerKind.effectParam, pos_us: $0.0, flag: flag, value: $0.1) }
+            e.flags |= 1
+        }
+        s.mutate(marks.isEmpty ? "Add Effect" : "Add Effect to Selection") { d in
+            if let t, t < d.tracks.count { d.tracks[t].effects.append(e); d.tracks[t].layer.append(contentsOf: marks.map { .marker($0) }) } else { d.master_effects.append(e) }
         }
         s.selectedTrack = t
         (NSApp.delegate as? AppDelegate)?.viewEffectsRack(nil)
