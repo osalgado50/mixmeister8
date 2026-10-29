@@ -200,10 +200,13 @@ final class TimelineView: NSView {
         // Tramo resaltado (arrastrando sobre la pista)
         if let r = rangeSel, r.track == item.index {
             let hr = NSRect(x: x(r.a), y: full.minY + header, width: x(r.b) - x(r.a), height: full.height - header)
-            Theme.accent.withAlphaComponent(0.28).setFill(); hr.fill(using: .sourceOver)
+            // Más oscuro que el resto de la pista (como el original) y con bordes, para que se vea
+            // también sobre una pista seleccionada y en cualquier skin.
+            NSColor.black.withAlphaComponent(0.32).setFill(); hr.fill(using: .sourceOver)
             Theme.accent.setFill()
-            NSRect(x: hr.minX, y: hr.minY, width: 1, height: hr.height).fill()
-            NSRect(x: hr.maxX - 1, y: hr.minY, width: 1, height: hr.height).fill()
+            NSRect(x: hr.minX, y: hr.minY, width: 2, height: hr.height).fill()
+            NSRect(x: hr.maxX - 2, y: hr.minY, width: 2, height: hr.height).fill()
+            NSRect(x: hr.minX, y: hr.minY, width: hr.width, height: 2).fill()
         }
 
         // Bucles: sombreado entre inicio y fin

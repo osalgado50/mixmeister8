@@ -41,6 +41,7 @@ final class Session {
             do {
                 try self.catalog.load(from: p)
                 DispatchQueue.main.async {
+                    TweakStore.resetCache()          // la columna TWEAKED cuenta ya los Tweaks de MixMeister
                     NotificationCenter.default.post(name: .libraryChanged, object: nil)
                     if !self.doc.tracks.isEmpty { self.resolveAll(); self.relayout() }
                 }
@@ -121,6 +122,13 @@ final class Session {
         RecentFiles.add(p)
         clearRecovery()
         NotificationCenter.default.post(name: .playlistChanged, object: nil)
+    }
+
+    /// Pasa la lista al motor y la vuelve a leer (para operar en el motor sobre lo que hay ahora,
+    /// p. ej. generar un Tweak). Como al guardar.
+    func syncEngine() throws {
+        try engineDoc.write(doc)
+        doc = try engineDoc.read()
     }
 
     let undo = UndoManager()

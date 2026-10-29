@@ -275,6 +275,11 @@ enum FxHost {
     /// Pone en el nodo los valores (normalizados) de la lista.
     static func apply(_ e: PLEffect, _ r: FxCatalog.Resolved, to n: AVAudioUnitEffect) {
         n.bypass = e.flags & 1 != 0
+        // Un AIR del original: sus parámetros principales, llevados a los del equivalente propio.
+        if !r.native, let t = r.type, let m = AirEffects.map(e) {
+            for (air, (k, conv)) in m where k < t.params.count { set(t, t.params[k], conv(AirEffects.value(e, air)), on: n) }
+            return
+        }
         guard let t = r.type, r.native else { return }
         for (i, p) in t.params.enumerated() { set(t, p, i < e.params.count ? e.params[i] : p.defNorm, on: n) }
     }
@@ -304,7 +309,18 @@ enum FxHost {
 
 /// Audio Unit propio (en el proceso) que ejecuta los efectos del motor (mmn_fx_*).
 final class MM8FxUnit: AUAudioUnit {
-    final class RenderState { var fx: OpaquePointer?; var scratch: AVAudioPCMBuffer? }
+    final class RenderState {
+        var fx: OpaquePointer?; var scratch: AVAudioPCMBuffer?
+        /// Bypass (Enable/Bypass del rack y sus marcadores): se pasa el audio seco, con un fundido de
+        /// ~10 ms entre seco y procesado para que encender o apagar el efecto no haga clic.
+        var bypass = false
+        var mix: Float = 1                 // 0 = seco, 1 = procesado (lo que suena ahora)
+        var dry: AVAudioPCMBuffer?
+    }
+    override var shouldBypassEffect: Bool {
+        get { state.bypass }
+        set { state.bypass = newValue }
+    }
     private let kind: Int32
     private var inBus: AUAudioUnitBus!, outBus: AUAudioUnitBus!
     private var ins: AUAudioUnitBusArray!, outs: AUAudioUnitBusArray!
@@ -356,6 +372,8 @@ final class MM8FxUnit: AUAudioUnit {
         for i in 0..<8 { mmn_fx_set(fx, Int32(i), values[i]) }
         state.scratch = AVAudioPCMBuffer(pcmFormat: AVAudioFormat(standardFormatWithSampleRate: f.sampleRate, channels: max(1, f.channelCount))!,
                                          frameCapacity: maximumFramesToRender)
+        state.dry = AVAudioPCMBuffer(pcmFormat: AVAudioFormat(standardFormatWithSampleRate: f.sampleRate, channels: 2)!, frameCapacity: maximumFramesToRender)
+        state.mix = state.bypass ? 0 : 1
         state.fx = fx
     }
 
@@ -382,7 +400,26 @@ final class MM8FxUnit: AUAudioUnit {
             if err != noErr { return err }
             guard let fx = st.fx, abl.count > 0, let l = abl[0].mData?.assumingMemoryBound(to: Float.self) else { return noErr }
             let r = abl.count > 1 ? abl[1].mData?.assumingMemoryBound(to: Float.self) : nil
+            let target: Float = st.bypass ? 0 : 1
+            if target == 0 && st.mix == 0 { return noErr }                 // apagado: seco, sin gastar CPU
+            if target == 1 && st.mix == 1 { mmn_fx_process(fx, l, r, Int32(frames)); return noErr }
+            // Transición: se guarda el seco, se procesa y se funde (10 ms).
+            guard let dry = st.dry?.floatChannelData, Int(frames) <= Int(st.dry!.frameCapacity) else {
+                st.mix = target; if target == 1 { mmn_fx_process(fx, l, r, Int32(frames)) }; return noErr
+            }
+            let n = Int(frames)
+            if st.mix == 0 { mmn_fx_reset(fx) }                              // entra limpio, sin restos de antes
+            dry[0].update(from: l, count: n)
+            if let r { dry[1].update(from: r, count: n) }
             mmn_fx_process(fx, l, r, Int32(frames))
+            let step: Float = 1 / Float(max(1, 0.01 * 44100))
+            var g = st.mix
+            for i in 0..<n {
+                g = target > g ? min(target, g + step) : max(target, g - step)
+                l[i] = dry[0][i] + (l[i] - dry[0][i]) * g
+                if let r { r[i] = dry[1][i] + (r[i] - dry[1][i]) * g }
+            }
+            st.mix = g
             return noErr
         }
     }
@@ -402,4 +439,59 @@ final class FxPool {
     }
     func existing(_ slot: UInt32) -> AVAudioUnitEffect? { nodes[slot]?.node }
     func reset() { nodes.removeAll() }
+}
+
+/// Efectos AIR del original (AIR Music Technology; con licencia: MixMeister 8 no los incluye y suenan
+/// con su equivalente propio). Guardan sus parámetros en un bloque «ACVS»: nombre en +8, +72 u32 = 1,
+/// +76 u32 = número de parámetros y, desde +80, los parámetros normalizados (f32 0..1) en el orden del
+/// rack del original (por columnas) y de su desplegable de parámetros. Comprobado el 29-10-2026: AIR
+/// Phaser Rate 1,00 → 3,39 Hz cambia el primer valor 0,500 → 0,765 (escala 0,1–10 Hz logarítmica).
+enum AirEffects {
+    /// Floats de cabecera antes del primer parámetro (80 bytes).
+    static let offset = 20
+    static let names: [String: [String]] = [
+        "AIR Distortion": ["Mode", "Pre-Shape", "Drive", "Threshold", "Edge", "High Cut", "Output", "Stereo", "Mix"],
+        "AIR Non-Lin Reverb": ["Dry Delay", "Pre-Delay", "Time", "Diffusion", "Low Cut", "High Cut", "Width", "Shape", "Mix"],
+        "AIR Delay": ["Time", "Sync", "L/R Ratio", "Feedback", "Fdbk Damp", "Fdbk Reso", "Fdbk Reso Freq", "HPF", "Width", "Mix"],
+        "AIR Fuzz-Wah": ["Mix", "Order", "Fuzz", "Fuzz Mix", "Drive", "Tone", "Output", "Wah", "Wah Mix", "Pedal",
+                         "Min Freq", "Max Freq", "Min Reso", "Max Reso", "Filter Mode", "Mod Mode", "Rate", "Depth"],
+        "AIR Flanger": ["Rate", "Depth", "Feedback", "Headroom", "Mix"],
+        "AIR Filter Gate": ["Pattern", "Rate", "Swing", "Attack", "Hold", "Release", "Filter Mode", "Cutoff", "Resonance",
+                            "Env Mod", "LFO Mod", "LFO Wave", "Mix"],
+        "AIR Phaser": ["Rate", "Depth", "Feedback", "Offset", "Offset Type", "Model", "Mix"],
+    ]
+    /// Nombres de los parámetros si `e` es un AIR con su bloque completo.
+    static func paramNames(_ e: PLEffect) -> [String]? {
+        guard let n = names[e.name] ?? names.first(where: { e.name.hasPrefix($0.key) })?.value,
+              e.params.count >= offset + n.count else { return nil }
+        // +76: número de parámetros (comprobación; si no cuadra, no se interpreta el bloque).
+        if Float(e.params[offset - 1]).bitPattern != UInt32(n.count) { return nil }
+        return n
+    }
+    static func value(_ e: PLEffect, _ i: Int) -> Double { offset + i < e.params.count ? e.params[offset + i] : 0.5 }
+    /// Cómo se lee el valor en el rack: en unidades donde la escala está medida; si no, en %.
+    static func text(_ e: PLEffect, _ i: Int) -> (Double) -> String {
+        if e.name.hasPrefix("AIR Phaser"), i == 0 { return { String(format: "%.2f Hz", logHz($0, 0.1, 10)) } }
+        return { String(format: "%.0f %%", $0 * 100) }
+    }
+
+    private static func logHz(_ v: Double, _ lo: Double, _ hi: Double) -> Double { lo * pow(hi / lo, v) }
+    private static func toLogNorm(_ hz: Double, _ lo: Double, _ hi: Double) -> Double { max(0, min(1, log(hz / lo) / log(hi / lo))) }
+    private static let same: (Double) -> Double = { $0 }
+    private static let bipolar: (Double) -> Double = { 0.5 + 0.5 * $0 }     // 0..100 % → −x..+x (0 en medio)
+    /// Parámetro del AIR → parámetro de su equivalente propio (índices en FxType.params, valor normalizado).
+    /// Phaser Rate convierte la escala medida; el resto es aproximado (misma posición del mando).
+    static let toSubstitute: [String: [Int: (Int, (Double) -> Double)]] = [
+        "AIR Flanger": [0: (0, same), 1: (1, same), 2: (2, bipolar), 4: (3, same)],
+        "AIR Phaser": [0: (0, { toLogNorm(logHz($0, 0.1, 10), 0.03, 6) }), 1: (1, same), 2: (2, same), 6: (4, same)],
+        "AIR Fuzz-Wah": [0: (5, same), 4: (0, same), 9: (1, same), 13: (2, same), 16: (3, same), 17: (4, same)],
+        "AIR Filter Gate": [1: (3, same), 6: (2, same), 7: (0, same), 8: (1, same), 12: (5, same)],
+        "AIR Distortion": [2: (0, same), 8: (6, same)],
+        "AIR Non-Lin Reverb": [1: (2, same), 2: (0, same), 8: (5, same)],
+        "AIR Delay": [0: (0, same), 3: (1, bipolar), 4: (2, same), 9: (3, same)],
+    ]
+    static func map(_ e: PLEffect) -> [Int: (Int, (Double) -> Double)]? {
+        guard paramNames(e) != nil else { return nil }
+        return toSubstitute[e.name] ?? toSubstitute.first(where: { e.name.hasPrefix($0.key) })?.value
+    }
 }

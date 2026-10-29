@@ -465,12 +465,11 @@ final class SlicerCanvas: NSView {
             }
         }
     }
-    /// Save measure markers as a Tweak: los Tweaks (por pista, en la biblioteca) aún no están.
+    /// Save measure markers as a Tweak: abre el diálogo Tweaks de la pista (el manual: «click Save
+    /// Measure Markers as Tweak, click Save As, type a name»). El Tweak lleva la rejilla (TKTM).
     @objc func saveTemplate() {
-        let a = NSAlert()
-        a.messageText = "Save Measure Markers as Tweak"
-        a.informativeText = "Los Tweaks se guardan en la biblioteca de MixMeister; esta parte aún no está en MixMeister 8. Los compases ya quedan guardados en la lista."
-        a.runModal()
+        guard let i = Session.shared.selectedTrack, i < Session.shared.doc.tracks.count else { return }
+        TweaksDialog(track: i, item: nil).run()
     }
 
     // MARK: Preescucha con metrónomo

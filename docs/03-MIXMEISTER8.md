@@ -19,7 +19,7 @@ de su manual (120 págs.) y de experimentos en MixMeister Studio 7.8 instalado e
 | 2. Reproducción | Play/Pause, Stop, Jog, Previous/Next, Mix Now, preescucha, medidores, salida elegible (Audio Output Configuration), volumen/EQ/tono/tempo por marcadores, rampas de tempo dentro de cada pista, limitador del master | **hecho**, probado en el Mac Pro (7 pasos de transporte); pendiente: arrastre de tempo en transiciones beatmix, segmentos invertidos |
 | 3. Edición de la línea de tiempo | arrastrar pistas y anclas, marcadores de volumen/EQ/etiqueta/bucle/efecto (añadir, mover, editar, borrar), Split, Reverse, Solo, overlays, tempo markers en la regla, Snap | |
 | 4. Diálogos | Edit Tag (tap, ½×, 2×, tonalidad), Track Settings, Tweaks y Quick Save, Smart Playlist, Find Similar, categorías, Clean Up/Import/Export Library, Add Files (análisis con el motor), Preferences | |
-| 5. Song Slicer y efectos | Beat Slicer con metrónomo; Effects Rack con efectos propios equivalentes a los del original (los AIR/NewBlue no se pueden incluir); parámetros automatizados | **hecho** (ver abajo); falta: efecto en parte de una pista, Save as Tweak, nombres de parámetros de los AIR |
+| 5. Song Slicer y efectos | Beat Slicer con metrónomo; Effects Rack con efectos propios equivalentes a los del original (los AIR/NewBlue no se pueden incluir); parámetros automatizados | **hecho** (ver abajo), incluidos efecto en parte de una pista, Tweaks y parámetros de los AIR |
 | 6. Directo y salida | salida doble (principal y preescucha), Perform/Pause, Fade and Cue Next, Mix Performance Now, Push/Drag Tempo, MIDI Learn y plantillas, MIDI clock | |
 | 7. Exportar | a fichero (AIFF/WAV/AAC, por canciones o por etiquetas), a Música (iTunes), CD de audio sin pausas (CUE/BIN + grabadora del sistema), botones de arriba a la derecha de la lista; imprimir biblioteca y lista | **hecho** salvo MP3 (macOS no trae codificador) e imprimir; la grabación física del CD falta probarla con una grabadora conectada |
 
@@ -73,6 +73,26 @@ de su manual (120 págs.) y de experimentos en MixMeister Studio 7.8 instalado e
   Flanger a 0 idéntica a la seca; lista guardada = original + 86 bytes del EFXT; MixMeister 7.8 abre
   esa lista (el efecto propio lo deja sin cargar, sin error).
 
+## Efecto en parte de una pista, Tweaks y efectos AIR — comprobado contra MixMeister 7.8 (29-10-2026)
+
+- **Efecto en un tramo:** arrastrar sobre una pista lo resalta (ajustado a Tools › Snap To, que ahora
+  se aplica); soltar un efecto dentro lo pone solo ahí: efecto desactivado + cuatro marcadores de
+  Enable/Bypass (0 y 1 al principio, 1 y 0 al final, el segundo de cada par 2 µs después), como el
+  original. Los efectos propios atienden a Enable/Bypass con un fundido de 10 ms (antes sonaban siempre).
+  Pruebas: la lista guardada por el original y un tramo hecho en MM8 solo cambian en ese tramo.
+- **Tweaks** (Tools › Tweaks… ⌃W, Quick Save Tweak ⌃S, y en los menús de la lista, la línea de tiempo y
+  la biblioteca): diálogo con Load, Save, Save As, Set As Default, Rename, Delete, Cancel (deshace lo
+  cargado) y OK; presets Beatmix, Simple y No Transition; columna TWEAKED («>»); la canción entra en
+  una lista con su Tweak por defecto. Mismo formato que el original (RIFF «MMDM»): el Tweak que genera
+  MM8 es **idéntico byte a byte** al que guardó MixMeister 7.8, y cargarlo deja la pista sonando igual.
+  MM8 no escribe en la biblioteca de MixMeister: guarda sus Tweaks en `~/Library/Application Support/
+  MixMeister 8/Tweaks/` y copia ahí los del original la primera vez.
+- **Efectos AIR:** el rack muestra sus parámetros con los nombres y el orden del original (mandos por
+  columnas, como el original) y sus valores reales (bloque «ACVS»); al editarlos se guardan donde el
+  original los espera. Los principales (Rate, Depth, Feedback, Mix, Drive…) se llevan al efecto propio
+  equivalente, también su automatización. AIR Phaser Rate con su escala medida (0,1–10 Hz).
+- Menú Tools: las entradas que el nib despacha por `handleMenuItem:` (con etiqueta) ya van a su acción.
+
 ## Song Slicer — comprobado contra MixMeister 7.8
 
 - Rejilla entre marcadores de compás (TKTM): entre dos marcadores, round(distancia/compás) compases
@@ -83,7 +103,7 @@ de su manual (120 págs.) y de experimentos en MixMeister Studio 7.8 instalado e
   8:0, 10:0, 14:0, 25:0, como el original; el original quita también el último, MM8 lo deja).
 - Flechas blancas: mover la rejilla; primera/última línea: estirar o comprimir; mover un marcador
   suelto; Add Measure Start Marker, Delete All Measure Markers, Restore default (análisis),
-  preescucha con metrónomo (clics propios). Save as Tweak: pendiente (Tweaks).
+  preescucha con metrónomo (clics propios). Save Measure Markers as Tweak abre el diálogo Tweaks.
 
 ## Tempo del audio frente a tempo de la mezcla (corregido)
 
@@ -97,8 +117,8 @@ de su manual (120 págs.) y de experimentos en MixMeister Studio 7.8 instalado e
   «No Transition» o «Beatmix 8»).
 - Orden de reproducción de los segmentos reordenados a mano (Spinning310, pista 3).
 - Tonalidades mayores en el catálogo (todas las de la biblioteca actual son menores).
-- Nombres y orden de los parámetros de los AIR (para mapear sus valores al equivalente propio).
-- Efecto aplicado a una parte de la pista (arrastrar sobre un tramo resaltado).
+- Escalas de los parámetros de los AIR (salvo AIR Phaser Rate): hoy se llevan por la posición del mando.
+- Anclas exactas de los presets Simple y No Transition.
 
 ## Compilar (en el Mac, Terminal)
 

@@ -76,6 +76,11 @@ struct PLTrack: Codable, Hashable {
     var beat_markers_us: [Int64]
     var effects: [PLEffect]
     var layer: [PLLayerItem]
+    /// TRKH +48/+52: efecto y parámetro cuyos marcadores se ven en la pista (−2 = ninguno).
+    var fx_view_slot: Int32? = nil
+    var fx_view_param: UInt32? = nil
+    /// TRKH +38: estilo de mezcla (0x22 beatmix, 0x11 simple).
+    var mix_style: Int? = nil
 
     var markers: [PLMarker] { layer.compactMap { if case let .marker(m) = $0 { return m }; return nil } }
     var segments: [PLSegment] { layer.compactMap { if case let .segment(s) = $0 { return s }; return nil } }
@@ -130,6 +135,26 @@ final class EngineDocument {
     func save(to path: String) throws {
         var err: UnsafeMutablePointer<CChar>?
         if mmn_playlist_save(handle, path, &err) != 0 { throw takeError(err) }
+    }
+
+    /// La pista `track` (de lo último escrito con write) como Tweak de MixMeister (RIFF «MMDM»).
+    func tweakBlob(track: Int) throws -> Data {
+        var err: UnsafeMutablePointer<CChar>?
+        var out: UnsafeMutablePointer<UInt8>?
+        var len = 0
+        guard mmn_playlist_tweak_blob(handle, Int32(track), &out, &len, &err) == 0, let out else { throw takeError(err) }
+        defer { mmn_free_string(UnsafeMutableRawPointer(out).assumingMemoryBound(to: CChar.self)) }
+        return Data(bytes: out, count: len)
+    }
+
+    /// Mete en el motor la pista de un Tweak y la devuelve para ponerla en lugar de otra (conserva
+    /// lo que no interpretamos, p. ej. el estado de los efectos AIR).
+    func addTweakTrack(_ blob: Data) throws -> PLTrack {
+        var err: UnsafeMutablePointer<CChar>?
+        let js = blob.withUnsafeBytes { mmn_playlist_add_tweak_track(handle, $0.bindMemory(to: UInt8.self).baseAddress, blob.count, &err) }
+        guard let js else { throw takeError(err) }
+        defer { mmn_free_string(js) }
+        return try JSONDecoder().decode(PLTrack.self, from: Data(String(cString: js).utf8))
     }
 }
 

@@ -108,6 +108,13 @@ struct PlaylistTrack {
     double bpm = 0;                 ///< TRKH +24 / 1000
     bool overlay = false;           ///< Track Settings → Overlay Track
     float key_semitones = 0;        ///< Track Settings → Key Adjustment
+    /// TRKH +48/+52: efecto (instancia) y parámetro cuyos Effects Parameter Markers se ven en la
+    /// pista (−2 = ninguno; 0xFFF = Enable/Bypass). Comprobado: al añadir un efecto MixMeister pone
+    /// su instancia y 0xFFF; en 10 473 pistas sin efectos vale −2.
+    std::int32_t fx_view_slot = -2;
+    std::uint32_t fx_view_param = 0;
+    /// TRKH +38: estilo de mezcla de la pista (0x22 beatmix, 0x11 simple; experimento Preset - Simple).
+    std::uint16_t mix_style = 0x22;
     std::vector<std::uint8_t> header_raw;  ///< TRKH completo (56 bytes)
 
     // Mapa de tempo original (TKTM): duración del compás y marcadores del Beat Slicer.
@@ -139,6 +146,17 @@ Playlist parse_playlist(const std::vector<std::uint8_t>& bytes);
 /// Vuelve a montar el fichero desde el modelo. Sin cambios en el modelo, sale idéntico al leído.
 std::vector<std::uint8_t> serialize_playlist(const Playlist& p);
 void write_playlist(const std::string& path, const Playlist& p);
+
+// ---------------------------------------------------------------- Tweaks ---------------------
+// Un Tweak (ZTRACKPRESET.ZTRACKPRESETDATA en la biblioteca) es RIFF "MMDM" con el contenido de la
+// pista tal como va en la lista (TRKH, TRKF, TRSI/TRSO, TKTM, TKEL, TKLY) y, detrás, otra vez los
+// marcadores y segmentos de TKLY sueltos. Los efectos se renumeran desde 2 (con sus marcadores y
+// TRKH +48). Comprobado con un Tweak guardado por MixMeister 7.8 (docs/spec/mmp.md).
+std::vector<std::uint8_t> encode_tweak(PlaylistTrack t);
+PlaylistTrack decode_tweak(const std::vector<std::uint8_t>& bytes);
+/// Cambia los números de instancia de los efectos de la pista (`map[viejo] = nuevo`) en los EFXT,
+/// en sus Effects Parameter Markers y en TRKH +48.
+void renumber_effects(PlaylistTrack& t, const std::vector<std::pair<std::uint32_t, std::uint32_t>>& map);
 
 // ---------------------------------------------------------------- compatibilidad --------------
 

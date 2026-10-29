@@ -47,12 +47,17 @@ struct LibraryItem: Hashable {
     var timeText: String { seconds > 0 ? String(format: "%d:%02d", Int(seconds) / 60, Int(seconds) % 60) : "" }
 }
 
+struct CatalogTweak { var name: String; var data: Data; var isDefault: Bool }
+
 /// Lee la biblioteca de MixMeister (Core Data sobre SQLite) sin tocarla: se copia con la API de
 /// copia de SQLite (incluye lo pendiente del WAL) y se lee la copia.
 final class Catalog {
     private(set) var items: [LibraryItem] = []
     private(set) var categories: [String] = []
     private(set) var sourcePath: String?
+    /// Tweaks guardados en MixMeister 7.8, por identificador de audio (solo lectura; MixMeister 8
+    /// los copia a su propio almacén la primera vez, ver Tweaks.swift).
+    private(set) var tweaks: [String: [CatalogTweak]] = [:]
 
     static var candidates: [String] {
         let base = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/MixMeister Technology")
@@ -107,6 +112,18 @@ final class Catalog {
                 categories: links[pk] ?? [],
                 tweaked: sqlite3_column_type(st, 22) != SQLITE_NULL))
         }
+        // Tweaks (ZTRACKPRESET): bloque MMDM por canción; ZDEFAULTTRACKPRESET marca el de por defecto.
+        var tw: [String: [CatalogTweak]] = [:]
+        let byPK = Dictionary(out.map { ($0.id, $0.fileID) }, uniquingKeysWith: { a, _ in a })
+        try? query(db, """
+            SELECT p.ZCATALOG, p.ZTRACKPRESETNAME, p.ZTRACKPRESETDATA, (c.ZDEFAULTTRACKPRESET = p.Z_PK)
+            FROM ZTRACKPRESET p LEFT JOIN ZCATALOG c ON c.Z_PK = p.ZCATALOG
+            """) { st in
+            guard let fid = byPK[Int(sqlite3_column_int64(st, 0))], let blob = sqlite3_column_blob(st, 2) else { return }
+            let data = Data(bytes: blob, count: Int(sqlite3_column_bytes(st, 2)))
+            tw[fid, default: []].append(CatalogTweak(name: text(st, 1), data: data, isDefault: sqlite3_column_int(st, 3) == 1))
+        }
+        tweaks = tw
         items = out.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
         categories = cats.values.sorted()
         sourcePath = path

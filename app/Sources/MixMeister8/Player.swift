@@ -66,6 +66,7 @@ final class MixGraph {
         let type: FxType
         var resolved: FxCatalog.Resolved
         var auto: [(param: Int, env: [(t: Double, db: Double)])] = []
+        var airMap: [Int: (Int, (Double) -> Double)]?
         init(slot: UInt32, node: AVAudioUnitEffect, type: FxType, resolved: FxCatalog.Resolved) {
             self.slot = slot; self.node = node; self.type = type; self.resolved = resolved
         }
@@ -100,9 +101,12 @@ final class MixGraph {
             let r = FxCatalog.resolve(e)
             guard let t = r.type, let n = fxNode(e, t) else { return nil }
             FxHost.apply(e, r, to: n)
-            return FxSlot(slot: e.slot, node: n, type: t, resolved: r)
+            let s = FxSlot(slot: e.slot, node: n, type: t, resolved: r)
+            s.airMap = AirEffects.map(e)
+            return s
         }
     }
+    static var logFx = CommandLine.arguments.contains("--logfx")
     private static func automation(_ t: PLTrack, _ slots: [FxSlot]) {
         for s in slots {
             var byParam: [Int: [(t: Double, db: Double)]] = [:]
@@ -110,6 +114,7 @@ final class MixGraph {
                 byParam[Int(m.flag & 0xFFF), default: []].append((Double(m.pos_us) * 1e-6, m.value))
             }
             s.auto = byParam.map { ($0.key, $0.value.stableSorted { $0.t < $1.t }) }
+            if !s.auto.isEmpty { Log.write("efecto \(s.type.name) instancia \(s.slot) (\(s.resolved.native ? "propio" : "sustituto")): automatización " + s.auto.map { "p\($0.param)×\($0.env.count)" }.joined(separator: " ")) }
         }
     }
 
@@ -349,8 +354,19 @@ final class MixGraph {
             for f in c.fx where !f.auto.isEmpty {
                 for a in f.auto {
                     guard let v = Self.value(a.env, at: src) else { continue }
-                    if a.param == 0xFFF { f.node.bypass = v < 0.5; continue }
-                    guard f.resolved.native, a.param < f.type.params.count else { continue }
+                    if a.param == 0xFFF {
+                        if f.node.bypass != (v < 0.5) {
+                            f.node.bypass = v < 0.5
+                            if Self.logFx { Log.write(String(format: "efecto %@ %@ en %.2f s (audio %.2f s); bypass leído %d", f.type.name, v < 0.5 ? "apagado" : "encendido", mix, src, f.node.auAudioUnit.shouldBypassEffect ? 1 : 0)) }
+                        }
+                        continue
+                    }
+                    if !f.resolved.native {
+                        // Automatización de un AIR: al parámetro equivalente del efecto propio.
+                        if let (k, conv) = f.airMap?[a.param], k < f.type.params.count { FxHost.set(f.type, f.type.params[k], conv(v), on: f.node) }
+                        continue
+                    }
+                    guard a.param < f.type.params.count else { continue }
                     FxHost.set(f.type, f.type.params[a.param], v, on: f.node)
                 }
             }

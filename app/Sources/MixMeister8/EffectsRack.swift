@@ -105,28 +105,36 @@ final class RackModule: NSView {
     /// original sin equivalente exacto, sus valores guardados tal cual (los 12 primeros).
     var shownParams: [(name: String, def: Double, text: (Double) -> String)] {
         if resolved.native, let t = resolved.type {
-            return t.params.prefix(16).map { p in (p.name, p.defNorm, { p.text($0) }) }
+            return t.params.prefix(18).map { p in (p.name, p.defNorm, { p.text($0) }) }
+        }
+        // Un AIR del original: sus parámetros con sus nombres (valores del bloque, 0–100 %).
+        if let n = AirEffects.paramNames(effect) {
+            return n.enumerated().map { ($0.element, 0.5, AirEffects.text(effect, $0.offset)) }
         }
         return effect.params.prefix(12).indices.map { i in ("Param \(i + 1)", 0.5, { String(format: "%.0f %%", $0 * 100) }) }
     }
+    /// Dónde empiezan los parámetros en `effect.params` (en los AIR, tras la cabecera del bloque).
+    var paramOffset: Int { !resolved.native && AirEffects.paramNames(effect) != nil ? AirEffects.offset : 0 }
 
+    /// Mandos por columnas, de arriba abajo en dos filas, como el rack del original (AIR Distortion:
+    /// Mode/Pre-Shape, Drive/Threshold…, el mismo orden que su desplegable de parámetros).
     func layoutKnobs() {
         let ps = shownParams
         let cols = max(1, (ps.count + 1) / 2)
+        let off = paramOffset
         for (i, p) in ps.enumerated() {
             let k = KnobView()
             k.name = p.name
             k.defaultValue = p.def
             k.text = p.text
-            k.value = i < effect.params.count ? effect.params[i] : p.def
-            k.frame = NSRect(origin: NSPoint(x: 4 + CGFloat(i % cols) * KnobView.size.width,
-                                             y: Self.titleHeight + 4 + CGFloat(i / cols) * (KnobView.size.height + 2)), size: KnobView.size)
+            k.value = off + i < effect.params.count ? effect.params[off + i] : p.def
+            k.frame = NSRect(origin: NSPoint(x: 4 + CGFloat(i / 2) * KnobView.size.width,
+                                             y: Self.titleHeight + 4 + CGFloat(i % 2) * (KnobView.size.height + 2)), size: KnobView.size)
             addSubview(k)
             knobs.append(k)
         }
         frame.size = NSSize(width: max(170, 8 + CGFloat(cols) * KnobView.size.width), height: Self.titleHeight + 8 + 2 * (KnobView.size.height + 2))
     }
-
     var title: String {
         if resolved.native { return effect.name }
         if let t = resolved.type { return "\(effect.name)  →  \(t.name)" }
@@ -241,7 +249,8 @@ final class EffectsRackView: NSView {
         if key == structure {
             for (m, e) in zip(modules, fx) {
                 m.setEnabled(e.flags & 1 == 0)
-                for (i, k) in m.knobs.enumerated() where i < e.params.count && abs(k.value - e.params[i]) > 1e-6 { k.value = e.params[i] }
+                let off = m.paramOffset
+                for (i, k) in m.knobs.enumerated() where off + i < e.params.count && abs(k.value - e.params[off + i]) > 1e-6 { k.value = e.params[off + i] }
                 m.selected = e.slot == selectedSlot
             }
         } else {
@@ -265,8 +274,9 @@ final class EffectsRackView: NSView {
             m.onSelect = { [weak self] in self?.select(slot) }
             m.onToggle = { [weak self] in self?.toggleEnable(slot) }
             m.onDelete = { [weak self] in self?.deleteEffect(slot) }
+            let off = m.paramOffset
             for (i, k) in m.knobs.enumerated() {
-                k.onChange = { [weak self] v, done in self?.knobChanged(slot: slot, param: i, value: v, done: done) }
+                k.onChange = { [weak self] v, done in self?.knobChanged(slot: slot, param: i, index: off + i, value: v, done: done) }
             }
             content.addSubview(m)
             modules.append(m)
@@ -335,11 +345,13 @@ final class EffectsRackView: NSView {
         }
     }
 
-    private func knobChanged(slot: UInt32, param: Int, value: Double, done: Bool) {
+    /// `param`: número de parámetro (el de los marcadores); `index`: dónde va en `params` (en los AIR,
+    /// tras la cabecera del bloque).
+    private func knobChanged(slot: UInt32, param: Int, index: Int, value: Double, done: Bool) {
         if selectedSlot != slot { select(slot) }
         editEffect("Effect Parameter", slot: slot, coalesce: true) { e in
-            while e.params.count <= param { e.params.append(0) }
-            e.params[param] = value
+            while e.params.count <= index { e.params.append(0) }
+            e.params[index] = value
         }
         // Grabación: con la mezcla sonando, mover el parámetro que se sigue deja marcadores.
         let s = Session.shared, p = Player.shared
@@ -480,11 +492,17 @@ enum EffectsActions {
             }
             let flag = UInt32(e.slot) << 12 | 0xFFF
             let pa = src(max(a, item.mixStart)), pb = src(min(b, item.mixEnd))
-            marks = [(pa, 0.0), (pa, 1.0), (pb, 1.0), (pb, 0.0)].map { PLMarker(type: MarkerKind.effectParam, pos_us: $0.0, flag: flag, value: $0.1) }
+            // El segundo de cada par, 2 µs después (así los guarda el original: 34,302041 / 34,302043 s).
+            marks = [(pa, 0.0), (pa + 2, 1.0), (pb, 1.0), (pb + 2, 0.0)].map { PLMarker(type: MarkerKind.effectParam, pos_us: $0.0, flag: flag, value: $0.1) }
             e.flags |= 1
         }
         s.mutate(marks.isEmpty ? "Add Effect" : "Add Effect to Selection") { d in
-            if let t, t < d.tracks.count { d.tracks[t].effects.append(e); d.tracks[t].layer.append(contentsOf: marks.map { .marker($0) }) } else { d.master_effects.append(e) }
+            if let t, t < d.tracks.count {
+                d.tracks[t].effects.append(e)
+                d.tracks[t].layer.append(contentsOf: marks.map { .marker($0) })
+                // TRKH +48/+52: el efecto recién puesto y su Enable/Bypass son lo que se ve (como el original).
+                d.tracks[t].fx_view_slot = Int32(e.slot); d.tracks[t].fx_view_param = 0xFFF
+            } else { d.master_effects.append(e) }
         }
         s.selectedTrack = t
         (NSApp.delegate as? AppDelegate)?.viewEffectsRack(nil)

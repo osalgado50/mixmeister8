@@ -89,6 +89,7 @@ final class LibraryPane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSS
         visible = Columns.layout(prefix: "Catalog", keys: Columns.libraryKeys, defaults: ["Title", "Artist", "Bpm", "Album", "Time", "Key", "KeyCode"])
         rebuildColumns()
         NotificationCenter.default.addObserver(self, selector: #selector(reload), name: .libraryChanged, object: nil)
+        NotificationCenter.default.addObserver(forName: .tweaksChanged, object: nil, queue: .main) { [weak self] _ in self?.table.reloadData() }
         NotificationCenter.default.addObserver(self, selector: #selector(referenceChanged), name: .selectionChanged, object: nil)
         reload()
     }
@@ -262,7 +263,7 @@ final class LibraryPane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSS
         case "Time": return it.timeText
         case "Key": return it.keyText
         case "KeyCode": return it.keyCode
-        case "Tweaked": return it.tweaked ? "✓" : ""
+        case "Tweaked": return TweakStore.hasTweaks(it.fileID) ? ">" : ""
         case "Year": return it.year
         case "Genre": return it.genre
         case "Composer": return it.composer

@@ -107,7 +107,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
         if let i = args.firstIndex(of: "--addfx"), i + 1 < args.count {
             let tr = args.firstIndex(of: "--fxtrack").flatMap { $0 + 1 < args.count ? Int(args[$0 + 1]) : nil }
-            print("ADDFX \(EffectsActions.add(named: args[i + 1], toTrack: tr) ? "ok" : "no encontrado") \(args[i + 1]) → \(tr.map { "pista \($0 + 1)" } ?? "master")")
+            // --fxrange A B: como soltarlo sobre el tramo resaltado A–B (segundos de la mezcla)
+            let rg: (Double, Double)? = args.firstIndex(of: "--fxrange").flatMap { j in
+                j + 2 < args.count ? Double(args[j + 1]).flatMap { a in Double(args[j + 2]).map { (a, $0) } } : nil }
+            print("ADDFX \(EffectsActions.add(named: args[i + 1], toTrack: tr, range: rg) ? "ok" : "no encontrado") \(args[i + 1]) → \(tr.map { "pista \($0 + 1)" } ?? "master")" + (rg.map { String(format: " tramo %.2f–%.2f s", $0.0, $0.1) } ?? ""))
             if let j = args.firstIndex(of: "--fxvalue"), j + 1 < args.count, let v = Double(args[j + 1]) {
                 session.mutateLight("test") { d in
                     func set(_ e: inout PLEffect) { for k in e.params.indices { e.params[k] = v } }
@@ -116,6 +119,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                 }
             }
             fflush(stdout)
+        }
+        // Tweaks: --tweakdump N fichero (la pista N como Tweak) · --tweakload N nombre (cargarlo en la pista N)
+        // (esperan a la biblioteca de MixMeister, que se lee en segundo plano y trae sus Tweaks)
+        if args.contains("--tweakload"), Catalog.findMixMeisterCatalog() != nil {
+            let t0 = Date()
+            while session.catalog.sourcePath == nil && Date().timeIntervalSince(t0) < 20 { RunLoop.current.run(until: Date() + 0.1) }
+        }
+        if let i = args.firstIndex(of: "--tweakload"), i + 2 < args.count, let n = Int(args[i + 1]), n >= 1, n <= session.doc.tracks.count {
+            print("TWEAKLOAD \(TweaksActions.load(args[i + 2], track: n - 1) ? "ok" : "no encontrado") \(args[i + 2]) → pista \(n); disponibles: \(TweakStore.names(session.doc.tracks[n - 1].file_id).joined(separator: " | "))")
+            fflush(stdout)
+        }
+        if let i = args.firstIndex(of: "--tweakdump"), i + 2 < args.count, let n = Int(args[i + 1]), n >= 1, n <= session.doc.tracks.count {
+            do {
+                try session.syncEngine()
+                let b = try session.engineDoc.tweakBlob(track: n - 1)
+                try b.write(to: URL(fileURLWithPath: args[i + 2]))
+                print("TWEAKDUMP ok \(b.count) bytes")
+            } catch { print("TWEAKDUMP error \(error)") }
+            fflush(stdout)
+            if !args.contains(where: { ["--exporttest", "--snapshot", "--saveas"].contains($0) }) { NSApp.terminate(nil) }
         }
         if let i = args.firstIndex(of: "--slicer"), i + 1 < args.count, let n = Int(args[i + 1]) {
             session.selectedTrack = n
@@ -255,6 +278,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         if let i = args.firstIndex(of: "--saveas"), i + 1 < args.count {
             do { try session.save(to: args[i + 1]); print("SAVEAS ok \(args[i + 1])") } catch { print("SAVEAS error \(error)") }
             fflush(stdout)
+            if !args.contains(where: { ["--exporttest", "--snapshot", "--playtest", "--slicer"].contains($0) }) { NSApp.terminate(nil) }
         }
         // --where N t: qué audio de la pista N debe sonar en el instante t de la mezcla y a qué velocidad.
         if let i = args.firstIndex(of: "--where"), i + 2 < args.count, let n = Int(args[i + 1]), let t = Double(args[i + 2]),
@@ -289,6 +313,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             if let j = args.firstIndex(of: "--select"), j + 1 < args.count, let n = Int(args[j + 1]) { session.selectedTrack = n }
             if let j = args.firstIndex(of: "--zoom"), j + 1 < args.count, let z = Double(args[j + 1]) { timelinePane.zoom(by: z) }
             if let j = args.firstIndex(of: "--strips"), j + 1 < args.count, let n = Int(args[j + 1]) { session.strips = n }
+            if args.contains("--rack") { viewEffectsRack(nil) }
             let out = args[i + 1]
             DispatchQueue.main.asyncAfter(deadline: .now() + 6) { self.snapshot(to: out); NSApp.terminate(nil) }
         }
@@ -308,7 +333,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ s: NSApplication) -> Bool { true }
     /// Arrancada para una prueba (--snapshot, --exporttest…): al acabar se cierra sin preguntar.
-    private let testMode = CommandLine.arguments.contains { ["--snapshot", "--exporttest", "--serial", "--playtest", "--dumpbpm", "--fxtest", "--saveas", "--nulltest", "--synctest", "--quit", "--lufs", "--roundtrip", "--wavetime", "--crashtest", "--similar", "--orderflow"].contains($0) }
+    private let testMode = CommandLine.arguments.contains { ["--snapshot", "--exporttest", "--serial", "--playtest", "--dumpbpm", "--fxtest", "--saveas", "--nulltest", "--synctest", "--quit", "--lufs", "--roundtrip", "--wavetime", "--crashtest", "--similar", "--orderflow", "--tweakdump", "--tweakload"].contains($0) }
     func applicationShouldTerminate(_ s: NSApplication) -> NSApplication.TerminateReply {
         testMode || confirmDiscard() ? .terminateNow : .terminateCancel
     }
@@ -470,10 +495,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     // MARK: Validación de menús
 
+    /// Tools: el nib despacha por handleMenuItem: con etiquetas (Menus.swift, MenuTags).
+    static let tagActions: [Int: String] = [
+        2001: "addToCategory:", 2002: "removeFromActiveCategory:", 2003: "findSimilarTracks:",
+        2101: "addVolumeMarker:", 2102: "addTrebleMarker:", 2103: "addMidrangeMarker:", 2104: "addBassMarker:",
+        2105: "addLabelMarker:", 2106: "addEffectsParameterMarker:", 2107: "addLoopStartMarker:", 2108: "addLoopEndMarker:",
+        2109: "splitSegmentAtCursor:", 2110: "reverse:",
+        2201: "setAsNextPerformanceTrack:", 2202: "tweaks:", 2203: "quickSaveTweak:", 2204: "editTag:", 2205: "adjustTrackSettings:"]
+    @objc func handleMenuItem(_ item: NSMenuItem) {
+        guard let s = Self.tagActions[item.tag] else { return }
+        NSApp.sendAction(NSSelectorFromString(s), to: nil, from: item)
+    }
+
+    // MARK: Tweaks
+
+    /// Tools › Tweaks… (⌃W), y en los menús de la lista, la línea de tiempo y la biblioteca.
+    @objc func tweaks(_ s: Any?) {
+        if let i = session.selectedTrack, i < session.doc.tracks.count, !(library.window?.firstResponder === library.table) {
+            TweaksDialog(track: i, item: nil).run()
+        } else if let it = library.selectedItems.first {
+            TweaksDialog(track: nil, item: it).run()
+        }
+    }
+    @objc func trackPresets(_ s: Any?) { tweaks(s) }
+    @objc func quickSaveTweak(_ s: Any?) {
+        guard let i = session.selectedTrack else { return }
+        TweaksActions.quickSave(track: i)
+    }
+
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         guard let a = item.action else { return true }
-        let sel = NSStringFromSelector(a)
+        var sel = NSStringFromSelector(a)
+        if sel == "handleMenuItem:" {
+            guard let t = Self.tagActions[item.tag] else { return false }
+            sel = t
+            if !["tweaks:", "quickSaveTweak:"].contains(t) { return responds(to: NSSelectorFromString(t)) || NSApp.target(forAction: NSSelectorFromString(t)) != nil }
+        }
         switch sel {
+        case "tweaks:", "trackPresets:": return session.selectedTrack != nil || !library.selectedItems.isEmpty
+        case "quickSaveTweak:": return session.selectedTrack != nil
         case "view2Strips:", "view4Strips:", "view6Strips:", "view8Strips:":
             item.state = session.strips == Int(sel.dropFirst(4).prefix(1))! ? .on : .off
         case "timelineRulerTime:": item.state = timelinePane.timeline.rulerMeasures ? .off : .on
@@ -494,7 +554,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         case "viewSongSlicer:": item.state = bottom.tabs.selectedSegment == 0 ? .on : .off
         case "viewEffectsRack:": item.state = bottom.tabs.selectedSegment == 1 ? .on : .off
         case "savePlayList:", "savePlayListAs:": return !session.doc.tracks.isEmpty || session.path != nil
-        case "delete:", "del:", "tweaks:", "adjustTrackSettings:", "editTag:":
+        case "delete:", "del:", "adjustTrackSettings:", "editTag:":
             return session.selectedTrack != nil && (sel == "delete:" || sel == "del:")
         case "editRulerMarkerItem:", "deleteRulerMarkerItem:": return lane.point != nil
         case "burnCD:", "exportPlaylistToFile:", "exportPlaylistToDevice:", "exportPlaylistAsMobileMix:", "exportChooser:":
@@ -624,8 +684,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let items = library.selectedItems
         guard !items.isEmpty else { return }
         DispatchQueue.global(qos: .userInitiated).async {
-            let tracks = items.map { DefaultMix.track(for: $0) }
+            let base = items.map { DefaultMix.track(for: $0) }
             DispatchQueue.main.async {
+                let tracks = TweaksActions.withDefaults(base, items: items)   // con su Tweak por defecto, si lo tiene
                 self.session.mutate("Add to End of Playlist") { d in
                     d.tracks += tracks
                     Self.linkTransitions(&d)
@@ -738,7 +799,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let seg = item.segments.first { t >= $0.mixStart && t < $0.mixEnd } ?? item.segments.first
         guard let seg else { return }
         let src = seg.source(item, at: t)
-        let v = tp.param == 0xFFF ? (e.flags & 1 == 0 ? 1.0 : 0.0) : (tp.param < e.params.count ? e.params[tp.param] : 0.5)
+        let off = AirEffects.paramNames(e) != nil && !FxCatalog.resolve(e).native ? AirEffects.offset : 0
+        let v = tp.param == 0xFFF ? (e.flags & 1 == 0 ? 1.0 : 0.0) : (off + tp.param < e.params.count ? e.params[off + tp.param] : 0.5)
         session.mutateLight("Add Effects Parameter Marker") { d in
             d.tracks[tp.track].layer.append(.marker(PLMarker(type: MarkerKind.effectParam, pos_us: Int64(src * 1e6), flag: tp.slot << 12 | UInt32(tp.param), value: v)))
         }

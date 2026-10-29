@@ -105,6 +105,9 @@ J::Value playlist_json(const Playlist& p) {
             {"length_us", len},
             {"overlay", t.overlay},
             {"key_semitones", static_cast<double>(t.key_semitones)},
+            {"fx_view_slot", t.fx_view_slot},
+            {"fx_view_param", t.fx_view_param},
+            {"mix_style", static_cast<int>(t.mix_style)},
             {"beat_markers_us", beats},
             {"effects", fx},
             {"layer", layer}});
@@ -136,6 +139,9 @@ Playlist playlist_from(const J::Value& v, const Playlist& old) {
         t.bar_us = static_cast<std::int64_t>(tv["bar_us"].num(static_cast<double>(t.bar_us)));
         t.overlay = tv["overlay"].boolean(t.overlay);
         t.key_semitones = static_cast<float>(tv["key_semitones"].num(t.key_semitones));
+        t.fx_view_slot = static_cast<std::int32_t>(tv["fx_view_slot"].num(t.fx_view_slot));
+        t.fx_view_param = static_cast<std::uint32_t>(tv["fx_view_param"].num(t.fx_view_param));
+        t.mix_style = static_cast<std::uint16_t>(tv["mix_style"].num(t.mix_style));
         if (tv.has("beat_markers_us")) {
             const auto& a = tv["beat_markers_us"].arr();
             std::vector<Marker> bm;
@@ -240,6 +246,31 @@ int mmn_playlist_save(mmn_playlist* p, const char* path, char** err) {
     } catch (const std::exception& e) {
         set_err(err, e.what());
         return -1;
+    }
+}
+
+int mmn_playlist_tweak_blob(mmn_playlist* p, int track, unsigned char** out, size_t* len, char** err) {
+    try {
+        if (!p || track < 0 || static_cast<std::size_t>(track) >= p->pl.tracks.size()) throw std::runtime_error("pista fuera de la lista");
+        const auto b = encode_tweak(p->pl.tracks[static_cast<std::size_t>(track)]);
+        *out = static_cast<unsigned char*>(std::malloc(b.size()));
+        std::memcpy(*out, b.data(), b.size());
+        *len = b.size();
+        return 0;
+    } catch (const std::exception& e) {
+        set_err(err, e.what());
+        return -1;
+    }
+}
+
+char* mmn_playlist_add_tweak_track(mmn_playlist* p, const unsigned char* blob, size_t len, char** err) {
+    try {
+        p->pl.tracks.push_back(decode_tweak(std::vector<std::uint8_t>(blob, blob + len)));
+        const J::Value all = playlist_json(p->pl);
+        return dup(J::dump(all["tracks"].arr().back()));
+    } catch (const std::exception& e) {
+        set_err(err, e.what());
+        return nullptr;
     }
 }
 

@@ -49,11 +49,12 @@ RIFF "MXMP"
 | +24 | u32 | **BPM × 1000** | 139 985 en la pista de 139,985 BPM |
 | +32 | u16 | 2 | fijo |
 | +34 | u16 | **estilo: 1 principal, 2 overlay** | experimento *overlay* |
-| +36 | u32 | 0x00220001 casi siempre (¿mezcla de tiempos / tamaño de rebanada?) | sin confirmar |
+| +36 | u16 | 1 | fijo |
+| +38 | u16 | **estilo de mezcla: 0x22 beatmix, 0x11 simple** | experimento *Preset - Simple* (29-10-2026) |
 | +40 | f32 | **ajuste de tono (semitonos)** | experimento *key*: 2,0 |
 | +44 | u32 | 1 (14 pistas con 4) | sin confirmar |
-| +48 | i32 | −2 (6 pistas con 2 o 4) | sin confirmar |
-| +52 | u32 | 0 (12 pistas con 0xFFF) | sin confirmar |
+| +48 | i32 | **efecto (instancia) cuyos Effects Parameter Markers se ven** en la pista; −2 = ninguno | 10 473 pistas sin efectos: −2; con efectos: su instancia; al añadir un efecto lo pone el original |
+| +52 | u32 | **parámetro a la vista** (0xFFF = Enable/Bypass) | idem |
 
 Lo que no está confirmado se conserva tal cual al reescribir.
 
@@ -123,8 +124,30 @@ Los efectos originales son plug-ins de terceros (AIR, NewBlue), con licencia, qu
 puede incluir. La lista los conserva intactos y MixMeister 8 los asocia a efectos propios
 equivalentes por su identificador (pendiente: tabla de correspondencias).
 
+## Efecto en una parte de la pista (experimento exp-tramo.mmp, 29-10-2026)
+
+Resaltar los compases 20–40 de una pista y soltar AIR Flanger encima: el EFXT se añade a la pista con
+**flags = 1** (desactivado) y cuatro Effects Parameter Markers del parámetro Enable/Bypass (flag =
+instancia << 12 | 0xFFF): **0** al principio y **1** 2 µs después; **1** al final y **0** 2 µs después
+(34,302041 / 34,302043 s y 68,580136 / 68,580138 s). Entre marcadores el valor se interpola, así que el
+efecto suena solo en el tramo. Los AIR guardan sus parámetros como un bloque de estado propio (115 bytes
+en AIR Flanger), no como f32 sueltos.
+
+## Tweaks (ZTRACKPRESET.ZTRACKPRESETDATA de la biblioteca)
+
+RIFF **«MMDM»** con los hijos de la pista tal como van en la lista (TRKH, TRKF, TRSI/TRSO, LIST TKTM,
+LIST TKEL, LIST TKLY) y, detrás, **otra vez los TRKM/TRKS de TKLY sueltos**. Los efectos se renumeran
+desde la instancia 2 (EFXT, flags de sus marcadores y TRKH +48). MixMeister 8 genera el mismo bloque
+byte a byte (2262 de 2262 en la prueba). Diálogo: Load (aplica al momento), Save, Save As (pide «Tweak
+Name:»), Set As Default («(Default)» en la segunda columna), Rename, Delete; los tres presets (Beatmix,
+Simple, No Transition) no se pueden guardar, renombrar ni borrar. Quick Save Tweak guarda «Quick Save»
+y lo pone por defecto. ZCATALOG.ZDEFAULTTRACKPRESET apunta al Tweak por defecto.
+
+*Preset - Simple* sobre una pista beatmix: quita efectos y su automatización, los volúmenes automáticos y
+el marcador de tempo; anclas al principio del sonido y casi al final; TRKH +38 = 0x11.
+
 ## Pendiente de experimento
 
-Effects Parameter Marker; Tweaks y Quick Save Tweak; marcadores de tempo desde la regla; los
-campos sin confirmar de TRKH; el contenido de los 13 tipos de transición personalizados
+marcadores de tempo desde la regla; los campos sin confirmar de TRKH (+44);
+la posición exacta de las anclas de *Preset - Simple* y *Preset - No Transition*; el contenido de los 13 tipos de transición personalizados
 («Simple Custom», «Beatmix Custom»), que guardan sus ajustes en los marcadores.

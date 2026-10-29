@@ -31,6 +31,13 @@ const char* mmn_playlist_json(mmn_playlist* p);
 int mmn_playlist_set_json(mmn_playlist* p, const char* json, char** err);
 int mmn_playlist_save(mmn_playlist* p, const char* path, char** err);
 
+/* Tweaks (presets por pista de la biblioteca: RIFF "MMDM"). */
+/* La pista `track` como Tweak; `out` se libera con mmn_free_string. 0 = bien. */
+int mmn_playlist_tweak_blob(mmn_playlist* p, int track, unsigned char** out, size_t* len, char** err);
+/* Añade al final de la lista (en el motor) la pista de un Tweak y devuelve su JSON (con su "_src"),
+ * para ponerla en lugar de otra con mmn_playlist_set_json. Liberar con mmn_free_string. */
+char* mmn_playlist_add_tweak_track(mmn_playlist* p, const unsigned char* blob, size_t len, char** err);
+
 /* ---------- Audio ---------------------------------------------------------------------------- */
 
 /* Envolvente para dibujar la forma de onda: `bins` máximos absolutos (0..1), mono.

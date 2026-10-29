@@ -336,6 +336,11 @@ PlaylistTrack decode_track(const RiffChunk& trki) {
             t.bpm = get<std::uint32_t>(c.data, 24) / 1000.0;
             t.overlay = get<std::uint16_t>(c.data, 34) == 2;
             t.key_semitones = get<float>(c.data, 40);
+            if (c.data.size() >= 56) {
+                t.mix_style = get<std::uint16_t>(c.data, 38);
+                t.fx_view_slot = get<std::int32_t>(c.data, 48);
+                t.fx_view_param = get<std::uint32_t>(c.data, 52);
+            }
         } else if (c.id == "TRKF") {
             t.path = from_utf16(c.data);
         } else if (c.id == "TRSI") {
@@ -376,6 +381,9 @@ Bytes encode_header(const PlaylistTrack& t) {
     put(d, 24, static_cast<std::uint32_t>(std::llround(t.bpm * 1000)));
     put<std::uint16_t>(d, 34, t.overlay ? 2 : 1);
     put(d, 40, t.key_semitones);
+    put<std::uint16_t>(d, 38, t.mix_style);
+    put(d, 48, t.fx_view_slot);
+    put(d, 52, t.fx_view_param);
     return d;
 }
 
@@ -433,6 +441,42 @@ Playlist parse_playlist(const Bytes& bytes) {
 }
 
 Playlist read_playlist(const std::string& path) { return parse_playlist(read_file(path)); }
+
+void renumber_effects(PlaylistTrack& t, const std::vector<std::pair<std::uint32_t, std::uint32_t>>& map) {
+    auto to = [&](std::uint32_t old, bool& found) {
+        for (const auto& [a, b] : map) if (a == old) { found = true; return b; }
+        found = false;
+        return old;
+    };
+    for (auto& e : t.effects) { bool f; e.slot = to(e.slot, f); }
+    for (auto& it : t.layer) {
+        if (it.is_segment || it.marker.type != kEffectParam) continue;
+        bool f;
+        const std::uint32_t s = to(it.marker.flag >> 12, f);
+        if (f) it.marker.flag = (s << 12) | (it.marker.flag & 0xFFF);
+    }
+    if (t.fx_view_slot > 0) { bool f; const auto s = to(static_cast<std::uint32_t>(t.fx_view_slot), f); if (f) t.fx_view_slot = static_cast<std::int32_t>(s); }
+}
+
+Bytes encode_tweak(PlaylistTrack t) {
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> map;
+    for (std::size_t i = 0; i < t.effects.size(); ++i) map.emplace_back(t.effects[i].slot, static_cast<std::uint32_t>(2 + i));
+    renumber_effects(t, map);
+    RiffChunk root;
+    root.id = "RIFF";
+    root.type = "MMDM";
+    RiffChunk trki = encode_track(t);
+    root.children = trki.children;
+    for (const auto& c : trki.children)
+        if (c.type == "TKLY") for (const auto& k : c.children) root.children.push_back(k);
+    return serialize_riff(root);
+}
+
+PlaylistTrack decode_tweak(const Bytes& bytes) {
+    const RiffChunk root = parse_riff(bytes);
+    if (root.type != "MMDM") throw std::runtime_error("no es un Tweak de MixMeister (RIFF/MMDM)");
+    return decode_track(root);   // los TRKM/TRKS sueltos del final no son hijos que lea decode_track
+}
 
 Bytes serialize_playlist(const Playlist& p) {
     RiffChunk root;
