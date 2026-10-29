@@ -1,3 +1,6 @@
+#ifdef __APPLE__
+#include <Accelerate/Accelerate.h>
+#endif
 #include "mmn/analysis.hpp"
 
 #include "mmn/dsp.hpp"
@@ -66,21 +69,42 @@ std::vector<double> autocorr(std::span<const float> v, std::size_t max_lag) {
 }
 
 /// Coherencia de fase de la envolvente a frecuencia `f` (Hz): Σ env·e^{-i2πft}.
+/// Aritmética compleja a mano: std::complex<double>::operator*= comprueba infinitos y NaN en cada
+/// producto (__muldc3) y era la cuarta parte del análisis.
 std::complex<double> coherence(const OnsetEnvelope& e, double f) {
-    std::complex<double> acc = 0;
-    const std::complex<double> step = std::polar(1.0, -kTwoPi * f * e.hop_s);
-    std::complex<double> w = std::polar(1.0, -kTwoPi * f * e.offset_s);
+    double ar = 0, ai = 0;
+    const double sr = std::cos(-kTwoPi * f * e.hop_s), si = std::sin(-kTwoPi * f * e.hop_s);
+    double wr = std::cos(-kTwoPi * f * e.offset_s), wi = std::sin(-kTwoPi * f * e.offset_s);
     for (float x : e.full) {
-        acc += static_cast<double>(x) * w;
-        w *= step;
+        ar += x * wr, ai += x * wi;
+        const double t = wr * sr - wi * si;
+        wi = wr * si + wi * sr, wr = t;
     }
-    return acc;
+    return {ar, ai};
 }
 
-/// Puntuación de una rejilla de periodo P: fundamental + corcheas + semicorcheas.
+/// Puntuación de una rejilla de periodo P: fundamental + corcheas + semicorcheas, en una sola
+/// pasada (los giros del 2.º y 4.º armónico son el cuadrado y la cuarta potencia del 1.º).
 double grid_score(const OnsetEnvelope& e, double period) {
-    return std::abs(coherence(e, 1.0 / period)) + 0.5 * std::abs(coherence(e, 2.0 / period)) +
-           0.25 * std::abs(coherence(e, 4.0 / period));
+    const double f = 1.0 / period;
+    double a1r = 0, a1i = 0, a2r = 0, a2i = 0, a4r = 0, a4i = 0;
+    const double sr = std::cos(-kTwoPi * f * e.hop_s), si = std::sin(-kTwoPi * f * e.hop_s);
+    double wr = std::cos(-kTwoPi * f * e.offset_s), wi = std::sin(-kTwoPi * f * e.offset_s);
+    std::size_t n = 0;
+    for (float x : e.full) {
+        const double w2r = wr * wr - wi * wi, w2i = 2 * wr * wi;
+        const double w4r = w2r * w2r - w2i * w2i, w4i = 2 * w2r * w2i;
+        a1r += x * wr, a1i += x * wi;
+        a2r += x * w2r, a2i += x * w2i;
+        a4r += x * w4r, a4i += x * w4i;
+        const double t = wr * sr - wi * si;
+        wi = wr * si + wi * sr, wr = t;
+        if ((++n & 4095) == 0) {  // sin deriva de módulo en pistas largas
+            const double m = 1.0 / std::sqrt(wr * wr + wi * wi);
+            wr *= m, wi *= m;
+        }
+    }
+    return std::hypot(a1r, a1i) + 0.5 * std::hypot(a2r, a2i) + 0.25 * std::hypot(a4r, a4i);
 }
 
 }  // namespace
@@ -246,7 +270,16 @@ OnsetEnvelope onset_envelope(std::span<const float> mono, int sr) {
     std::vector<float> prev(s.bins, 0.0f), cur(s.bins);
     for (std::size_t t = 0; t < s.frames; ++t) {
         const float* m = s.row(t);
+#ifdef __APPLE__
+        {   // vForce: log1p vectorizado (es la mitad del coste de la envolvente)
+            const int cnt = static_cast<int>(k_hi - k_lo + 1);
+            const float c100 = 100.0f;
+            vDSP_vsmul(m + k_lo, 1, &c100, &cur[k_lo], 1, static_cast<vDSP_Length>(cnt));
+            vvlog1pf(&cur[k_lo], &cur[k_lo], &cnt);
+        }
+#else
         for (std::size_t k = k_lo; k <= k_hi; ++k) cur[k] = std::log1p(100.0f * m[k]);  // solo lo que se usa
+#endif
         for (std::size_t b = 0; b < e.n_bands; ++b) {
             const std::size_t a0 = edge[b], a1 = std::max(edge[b] + 1, edge[b + 1]);
             float acc = 0;

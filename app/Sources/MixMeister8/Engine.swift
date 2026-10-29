@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import Foundation
 import MMNEngine
 
@@ -202,6 +203,18 @@ struct Wave {
 
 enum Engine {
     static var version: String { String(cString: mmn_version()) }
+
+    /// Muestras (a `rate`) entre la línea de tiempo de MixMeister 7.8 y la de AVAudioFile para este
+    /// fichero: en los MP3, la trama Info y el retardo del codificador (hasta 51 ms). En caché.
+    private static var offsets: [String: Int] = [:]
+    private static let offsetsLock = NSLock()
+    static func mmOffset(_ path: String, rate: Double) -> AVAudioFramePosition {
+        offsetsLock.lock(); defer { offsetsLock.unlock() }
+        let n = offsets[path] ?? { let v = mmn_audio_mm_offset(path); offsets[path] = v; return v }()
+        // Las muestras son del MP3 (44,1 kHz casi siempre); AVAudioFile las da a su misma frecuencia.
+        _ = rate
+        return AVAudioFramePosition(n)
+    }
 
     /// Envolvente de la forma de onda (0..1) y duración en segundos.
     static func peaks(path: String, bins: Int) throws -> (peaks: [Float], seconds: Double) {

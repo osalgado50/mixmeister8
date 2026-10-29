@@ -33,16 +33,18 @@ n=$("$A" --fxtest 2>/dev/null | grep -c 'FXTEST ok')
 rt=$("$A" --roundtrip "$LISTAS" 2>/dev/null | grep ROUNDTRIP)
 echo "$rt" | awk '{exit !($2==$4 && $4>0)}' && ok "listas .mmp: ${rt#ROUNDTRIP }" || mal "listas .mmp: ${rt#ROUNDTRIP }"
 
-# 3. Calidad: una pista a su tempo sale idéntica bit a bit
+# 3. Calidad: una pista a su tempo sale idéntica bit a bit (en la línea de tiempo de MixMeister:
+#    el MP3 va retrasado lo que el original cuenta de más — trama Info y retardo del codificador)
+LEAD=$("$A" --mmoffset "$AUDIO" 2>/dev/null | grep MMOFFSET | awk '{print $2}')
 "$A" --nulltest "$AUDIO" $R/null.wav > /dev/null 2>&1
 afconvert -f WAVE -d LEI24 "$AUDIO" $R/ref.wav
-set -- $($PY "$T/nulo.py" $R/null.wav $R/ref.wav)
-[ "$1" = "$2" ] && ok "bit a bit: $1 de $2 muestras idénticas" || mal "bit a bit: $1 de $2 muestras idénticas"
+set -- $($PY "$T/nulo.py" $R/null.wav $R/ref.wav ${LEAD:-0})
+[ "$1" = "$2" ] && ok "bit a bit: $1 de $2 muestras idénticas (desfase MixMeister ${LEAD:-0} muestras)" || mal "bit a bit: $1 de $2 muestras idénticas"
 
 # 4. Sincronía de las pistas con el tempo cambiado (máx. 10 ms en 5 minutos)
 for tempo in 117.6 120.016 125; do
   "$A" --serial --synctest "$AUDIO" $R/s.wav --synctempo $tempo > /dev/null 2>&1
-  d=$($PY "$T/sincronia.py" $R/s.wav $tempo $R/ref.wav)
+  d=$($PY "$T/sincronia.py" $R/s.wav $tempo $R/ref.wav ${LEAD:-0})
   num "$d" 10 && ok "sincronía a $tempo BPM: máx. $d ms" || mal "sincronía a $tempo BPM: máx. $d ms"
 done
 

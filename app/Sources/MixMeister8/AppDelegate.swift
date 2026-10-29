@@ -28,6 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         playlist.table.target = self
         playlist.table.doubleAction = #selector(playFromPlaylistRow(_:))
         session.loadLibrary()
+        if !testMode || CommandLine.arguments.contains("--addfiles") { Library8.shared.start() }
         session.newPlaylist()
         var recovered = false
         if !testMode, FileManager.default.fileExists(atPath: Session.recoveryURL.path) {
@@ -119,6 +120,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                 }
             }
             fflush(stdout)
+        }
+        // --addfiles carpeta|fichero…: añadir a la biblioteca de MixMeister 8 y esperar al análisis
+        // (con MM8_LIBRARY=otra.json para no tocar la de verdad). Da canciones, tiempo y BPM.
+        if let i = args.firstIndex(of: "--addfiles") {
+            let paths = args[(i + 1)...].prefix { !$0.hasPrefix("--") }.map { URL(fileURLWithPath: $0) }
+            let t0 = Date()
+            let n = Library8.shared.add(paths)
+            Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { tm in
+                guard !Library8.shared.isBusy else { return }
+                tm.invalidate()
+                let items = self.session.catalog.items.filter { it in paths.contains { it.path.hasPrefix($0.path) } }
+                for it in items.prefix(400) { print(String(format: "ADDFILE %.3f\t%@\t%@", it.bpm, it.keyText, (it.path as NSString).lastPathComponent)) }
+                print(String(format: "ADDFILES %d nuevas, %d con BPM, %.1f s, %d núcleos", n, items.filter { $0.bpm > 0 }.count,
+                              Date().timeIntervalSince(t0), ProcessInfo.processInfo.activeProcessorCount))
+                fflush(stdout)
+                NSApp.terminate(nil)
+            }
         }
         // Tweaks: --tweakdump N fichero (la pista N como Tweak) · --tweakload N nombre (cargarlo en la pista N)
         // (esperan a la biblioteca de MixMeister, que se lee en segundo plano y trae sus Tweaks)
@@ -218,6 +236,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                 fflush(stdout)
                 DispatchQueue.main.async { NSApp.terminate(nil) }
             }
+        }
+        // --mmoffset fichero: muestras entre la línea de tiempo de MixMeister 7.8 y la de AVAudioFile.
+        if let i = args.firstIndex(of: "--mmoffset"), i + 1 < args.count {
+            print("MMOFFSET \(Engine.mmOffset(args[i + 1], rate: 44100))")
+            fflush(stdout)
+            NSApp.terminate(nil)
         }
         // --lufs fichero: sonoridad integrada y pico real de cualquier fichero de audio.
         if let i = args.firstIndex(of: "--lufs"), i + 1 < args.count {
@@ -333,7 +357,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ s: NSApplication) -> Bool { true }
     /// Arrancada para una prueba (--snapshot, --exporttest…): al acabar se cierra sin preguntar.
-    private let testMode = CommandLine.arguments.contains { ["--snapshot", "--exporttest", "--serial", "--playtest", "--dumpbpm", "--fxtest", "--saveas", "--nulltest", "--synctest", "--quit", "--lufs", "--roundtrip", "--wavetime", "--crashtest", "--similar", "--orderflow", "--tweakdump", "--tweakload"].contains($0) }
+    private let testMode = CommandLine.arguments.contains { ["--snapshot", "--exporttest", "--serial", "--playtest", "--dumpbpm", "--fxtest", "--saveas", "--nulltest", "--synctest", "--quit", "--lufs", "--roundtrip", "--wavetime", "--crashtest", "--similar", "--orderflow", "--tweakdump", "--tweakload", "--mmoffset", "--addfiles"].contains($0) }
     func applicationShouldTerminate(_ s: NSApplication) -> NSApplication.TerminateReply {
         testMode || confirmDiscard() ? .terminateNow : .terminateCancel
     }
@@ -502,6 +526,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         2105: "addLabelMarker:", 2106: "addEffectsParameterMarker:", 2107: "addLoopStartMarker:", 2108: "addLoopEndMarker:",
         2109: "splitSegmentAtCursor:", 2110: "reverse:",
         2201: "setAsNextPerformanceTrack:", 2202: "tweaks:", 2203: "quickSaveTweak:", 2204: "editTag:", 2205: "adjustTrackSettings:"]
+    /// File › Add Files to Library… y el botón ⊕ de la biblioteca.
+    @objc func addFilesToLibrary(_ s: Any?) { AddFilesDialog.run() }
+
     @objc func handleMenuItem(_ item: NSMenuItem) {
         guard let s = Self.tagActions[item.tag] else { return }
         NSApp.sendAction(NSSelectorFromString(s), to: nil, from: item)
@@ -982,7 +1009,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 /// última ventana de 32 tiempos, y los volúmenes de Beatmix 8 (transitions.xml).
 enum DefaultMix {
     static func track(for it: LibraryItem) -> PLTrack {
-        let a = try? Engine.analyze(path: it.path)
+        let a = Engine.analyzeCached(path: it.path)
         let bpm = a?.bpm ?? (it.bpm > 0 ? it.bpm : 120)
         let beat = 60 / bpm
         let first = a?.first_beat_s ?? 0

@@ -44,6 +44,11 @@ char* mmn_playlist_add_tweak_track(mmn_playlist* p, const unsigned char* blob, s
  * Devuelve la duración en segundos, o < 0 si no se pudo leer. */
 double mmn_audio_peaks(const char* path, float* out, size_t bins, char** err);
 
+/* Muestras que hay que sumar a la posición en un fichero leído con Core Audio (AVAudioFile) para
+ * estar en la línea de tiempo de MixMeister 7.8, la de las marcas de sus listas y del análisis
+ * del motor. Solo los MP3 difieren (trama Info/Xing y retardo del codificador). */
+long mmn_audio_mm_offset(const char* path);
+
 /* Análisis de una pista (tempo, rejilla, tonalidad) en JSON. Liberar con mmn_free_string. */
 char* mmn_analyze_json(const char* path, char** err);
 

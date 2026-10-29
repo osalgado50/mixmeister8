@@ -4,6 +4,10 @@
 #include <numbers>
 #include <stdexcept>
 
+#ifdef __APPLE__
+#include <Accelerate/Accelerate.h>
+#endif
+
 namespace mmn {
 namespace {
 
@@ -77,8 +81,31 @@ void radix2(std::span<cfloat> x, const std::vector<std::size_t>& rev, const std:
 
 }  // namespace
 
+#ifdef __APPLE__
+/// vDSP: FFT del sistema (Accelerate), varias veces más rápida que la radix-2 propia. Mismas
+/// convenciones: directa con e^{-i…}, inversa sin dividir por n.
+struct Fft::Native {
+    FFTSetup setup = nullptr;
+    vDSP_Length log2n = 0;
+    std::vector<float> re, im;
+    ~Native() { if (setup) vDSP_destroy_fftsetup(setup); }
+};
+#else
+struct Fft::Native {};
+#endif
+
 Fft::Fft(std::size_t n) : n_(n) {
     if (n < 2 || (n & (n - 1))) throw std::invalid_argument("FFT: tamaño no potencia de dos");
+#ifdef __APPLE__
+    if (n >= 4) {
+        native_ = std::make_shared<Native>();
+        while ((std::size_t{1} << native_->log2n) < n) ++native_->log2n;
+        native_->setup = vDSP_create_fftsetup(native_->log2n, kFFTRadix2);
+        native_->re.resize(n), native_->im.resize(n);
+        if (native_->setup) return;
+        native_.reset();
+    }
+#endif
     rev_ = bitrev(n);
     tw_ = stage_twiddles(n);
     rev_h_ = bitrev(n / 2);
@@ -88,6 +115,16 @@ Fft::Fft(std::size_t n) : n_(n) {
 
 void Fft::run(std::span<cfloat> x, bool inv) const {
     if (x.size() != n_) throw std::invalid_argument("FFT: tamaño distinto");
+#ifdef __APPLE__
+    if (native_) {
+        auto& N = *native_;
+        DSPSplitComplex z{N.re.data(), N.im.data()};
+        vDSP_ctoz(reinterpret_cast<const DSPComplex*>(x.data()), 2, &z, 1, n_);
+        vDSP_fft_zip(N.setup, &z, 1, N.log2n, inv ? kFFTDirection_Inverse : kFFTDirection_Forward);
+        vDSP_ztoc(&z, 1, reinterpret_cast<DSPComplex*>(x.data()), 2, n_);
+        return;
+    }
+#endif
     radix2(x, rev_, tw_, inv);
 }
 void Fft::forward(std::span<cfloat> x) const { run(x, false); }
@@ -96,6 +133,20 @@ void Fft::inverse(std::span<cfloat> x) const { run(x, true); }
 void Fft::real_forward(std::span<const float> in, std::span<cfloat> out) const {
     const std::size_t h = n_ / 2;
     if (in.size() != n_ || out.size() != h + 1) throw std::invalid_argument("FFT real: tamaños");
+#ifdef __APPLE__
+    if (native_) {
+        // vDSP_fft_zrip: pares (par, impar) como complejos; sale escalada ×2, con DC en re[0] y
+        // Nyquist en im[0].
+        auto& N = *native_;
+        DSPSplitComplex z{N.re.data(), N.im.data()};
+        vDSP_ctoz(reinterpret_cast<const DSPComplex*>(in.data()), 2, &z, 1, h);
+        vDSP_fft_zrip(N.setup, &z, 1, N.log2n, kFFTDirection_Forward);
+        out[0] = {0.5f * N.re[0], 0.0f};
+        out[h] = {0.5f * N.im[0], 0.0f};
+        for (std::size_t k = 1; k < h; ++k) out[k] = {0.5f * N.re[k], 0.5f * N.im[k]};
+        return;
+    }
+#endif
     auto& z = scratch_;  // sin reservar memoria en cada marco
     z.resize(h);
     for (std::size_t k = 0; k < h; ++k) z[k] = {in[2 * k], in[2 * k + 1]};

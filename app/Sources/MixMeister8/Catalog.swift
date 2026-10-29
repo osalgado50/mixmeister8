@@ -124,12 +124,28 @@ final class Catalog {
             tw[fid, default: []].append(CatalogTweak(name: text(st, 1), data: data, isDefault: sqlite3_column_int(st, 3) == 1))
         }
         tweaks = tw
-        items = out.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+        catalogItems = out
+        rebuildItems()
         categories = cats.values.sorted()
         sourcePath = path
     }
 
     func item(fileID: String) -> LibraryItem? { items.first { $0.fileID == fileID.uppercased() } }
+
+    // MARK: Canciones añadidas con MixMeister 8 (Library8.swift), junto a las de MixMeister
+
+    private var catalogItems: [LibraryItem] = []
+    private var extraItems: [LibraryItem] = []
+    /// Las de MixMeister 8; las que ya están en la biblioteca de MixMeister no se repiten.
+    func setExtra(_ e: [LibraryItem]) { extraItems = e; rebuildItems() }
+    func hasPath(_ p: String) -> Bool { catalogItems.contains { $0.path == p } }
+    private let lock = NSLock()   // la biblioteca de MixMeister se lee en segundo plano
+    private func rebuildItems() {
+        lock.lock(); defer { lock.unlock() }
+        let known = Set(catalogItems.map(\.path))
+        items = (catalogItems + extraItems.filter { !known.contains($0.path) })
+            .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+    }
 
     // MARK: SQLite
 

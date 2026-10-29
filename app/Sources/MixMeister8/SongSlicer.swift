@@ -456,7 +456,7 @@ final class SlicerCanvas: NSView {
     @objc func restoreTemplate() {
         guard let i = track, let p = audioPath else { NSSound.beep(); return }
         DispatchQueue.global(qos: .userInitiated).async {
-            guard let a = try? Engine.analyze(path: p), a.bpm > 0 else { DispatchQueue.main.async { NSSound.beep() }; return }
+            guard let a = Engine.analyzeCached(path: p), a.bpm > 0 else { DispatchQueue.main.async { NSSound.beep() }; return }
             let beat = 60 / a.bpm, barS = 4 * beat
             let m0 = a.first_beat_s + Double(a.downbeat) * beat
             let n = max(1, Int(((a.seconds - m0) / barS).rounded(.down)))
@@ -534,9 +534,14 @@ final class SlicerPreview {
             var id = dev.id
             AudioUnitSetProperty(au, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &id, UInt32(MemoryLayout<AudioDeviceID>.size))
         }
-        let a = AVAudioFramePosition(max(0, start) * sr)
+        // Las marcas están en la línea de tiempo de MixMeister; el fichero, en la de AVAudioFile.
+        let lead = Engine.mmOffset(path, rate: sr)
+        var a = AVAudioFramePosition(max(0, start) * sr) - lead
+        var wait: AVAudioFramePosition = 0
+        if a < 0 { wait = -a; a = 0 }
         guard a < file.length else { return }
-        player.scheduleSegment(file, startingFrame: a, frameCount: AVAudioFrameCount(file.length - a), at: nil)
+        player.scheduleSegment(file, startingFrame: a, frameCount: AVAudioFrameCount(file.length - a),
+                               at: wait > 0 ? AVAudioTime(sampleTime: wait, atRate: sr) : nil)
         let hi = Self.click(fmt, hz: 1760, gain: 0.6), lo = Self.click(fmt, hz: 1175, gain: 0.45)
         for b in beats where b >= start {
             let isDown = downbeats.contains { abs($0 - b) < 1e-6 }

@@ -262,7 +262,7 @@ final class Waveforms {
         guard let a = try? FileManager.default.attributesOfItem(atPath: path),
               let size = a[.size] as? Int64, let mod = a[.modificationDate] as? Date else { return nil }
         var h: UInt64 = 1469598103934665603
-        for b in "v2|\(path)|\(size)|\(mod.timeIntervalSince1970)|\(bins)".utf8 { h = (h ^ UInt64(b)) &* 1099511628211 }
+        for b in "v3|\(path)|\(size)|\(mod.timeIntervalSince1970)|\(bins)".utf8 { h = (h ^ UInt64(b)) &* 1099511628211 }
         return diskDir.appendingPathComponent(String(format: "%016llx.peaks", h))
     }
     private static func load(_ path: String) -> Wave? {

@@ -76,6 +76,56 @@ Buffer decode_wav(const std::vector<std::uint8_t>& d, const std::string& path) {
     return b;
 }
 
+/// Cabecera de la primera trama de un MP3: si es «Xing» (VBR) o «Info» (CBR), muestras por trama
+/// y retardo del codificador según la etiqueta LAME (en muestras, ya con las 529 del decodificador,
+/// como lo cuenta minimp3; 0 si no hay etiqueta).
+struct Mp3Head { bool xing = false, info = false; int frame_samples = 1152, delay = 0; };
+Mp3Head mp3_head(const std::uint8_t* p, std::size_t n) {
+    Mp3Head h;
+    const std::uint8_t* buf = p;
+    std::size_t size = n;
+    mp3dec_skip_id3(&buf, &size);
+    int free_format = 0, frame_bytes = 0;
+    const int at = mp3d_find_frame(buf, static_cast<int>(std::min<std::size_t>(size, 1 << 20)), &free_format, &frame_bytes);
+    if (!frame_bytes) return h;
+    const std::uint8_t* f = buf + at;
+    h.frame_samples = hdr_frame_samples(f);
+    uint32_t frames = 0;
+    int delay = 0, padding = 0;
+    if (mp3dec_check_vbrtag(f, frame_bytes, &frames, &delay, &padding) > 0) {
+        const auto e = f + std::min(frame_bytes, 200);
+        static constexpr char kInfo[] = {'I', 'n', 'f', 'o'};
+        h.info = std::search(f, e, kInfo, kInfo + 4) != e;
+        h.xing = !h.info;
+        h.delay = delay;
+    }
+    return h;
+}
+
+/// MixMeister 7.8 decodifica los MP3 sin recortar nada: la trama «Info» de los CBR de LAME suena
+/// como una trama de silencio y no descuenta el retardo del codificador (sí se salta la «Xing» de
+/// los VBR). minimp3 se salta ambas y recorta el retardo. Medido en 4175 pistas de la biblioteca
+/// frente a sus .mxm (29-10-2026): con «Info» las marcas de MixMeister caían 51 ms (1152 + 1105
+/// muestras) más tarde que nuestro análisis, con «Xing» 25 ms (1105), sin cabecera 0.
+/// Muestras que hay que poner delante de lo de minimp3 para estar en la línea de tiempo del original.
+/// Además, su decodificador entrega el audio 375 muestras antes que minimp3 (−8,5 ms de mediana en
+/// los tres tipos de cabecera, n = 3607; los WAV, sin decodificador, dan 0,2 ms).
+constexpr int kMixMeisterMp3Advance = 375;
+int mixmeister_lead(const Mp3Head& h) {
+    return (h.info ? h.frame_samples : 0) + ((h.info || h.xing) ? h.delay : 0) - kMixMeisterMp3Advance;
+}
+/// M4A/AAC: el original (QuickTime) entrega el audio 282 muestras antes que Core Audio hoy
+/// (−6,4 ms de mediana, n = 56).
+constexpr int kMixMeisterMp4Advance = 282;
+
+/// Pone `lead` muestras de silencio delante (o quita −lead del principio).
+void shift_start(Buffer& b, long lead) {
+    for (auto& c : b.ch) {
+        if (lead > 0) c.insert(c.begin(), static_cast<std::size_t>(lead), 0.0f);
+        else if (lead < 0) c.erase(c.begin(), c.begin() + std::min<std::size_t>(c.size(), static_cast<std::size_t>(-lead)));
+    }
+}
+
 Buffer decode_mp3(const std::vector<std::uint8_t>& d, const std::string& path) {
     mp3dec_t dec;
     mp3dec_file_info_t info{};
@@ -90,6 +140,7 @@ Buffer decode_mp3(const std::vector<std::uint8_t>& d, const std::string& path) {
     for (std::size_t i = 0; i < n; ++i)
         for (int c = 0; c < info.channels; ++c) b.ch[c][i] = info.buffer[i * info.channels + c];
     std::free(info.buffer);
+    shift_start(b, mixmeister_lead(mp3_head(d.data(), d.size())));
     return b;
 }
 
@@ -169,9 +220,28 @@ Buffer read_audio(const std::string& path) {
     // Contenedor MP4 (m4a/aac/alac): 'ftyp' en el byte 4. AIFF: 'FORM'. FLAC: 'fLaC'.
     const bool mp4 = d.size() >= 8 && !std::memcmp(d.data() + 4, "ftyp", 4);
     const bool other = d.size() >= 4 && (!std::memcmp(d.data(), "FORM", 4) || !std::memcmp(d.data(), "fLaC", 4));
-    if (mp4 || other) return decode_core_audio(path);
+    if (mp4) { auto b = decode_core_audio(path); shift_start(b, -kMixMeisterMp4Advance); return b; }
+    if (other) return decode_core_audio(path);
 #endif
     return decode_mp3(d, path);
+}
+
+long mixmeister_offset_frames(const std::string& path, bool system_decoder) {
+    std::ifstream f(path, std::ios::binary);
+    if (!f) return 0;
+    std::vector<std::uint8_t> d(1 << 20);
+    f.read(reinterpret_cast<char*>(d.data()), static_cast<std::streamsize>(d.size()));
+    d.resize(static_cast<std::size_t>(f.gcount()));
+    if (!system_decoder) return 0;            // read_audio ya decodifica en la línea del original
+    if (d.size() >= 12 && !std::memcmp(d.data(), "RIFF", 4)) return 0;
+    if (d.size() >= 8 && !std::memcmp(d.data() + 4, "ftyp", 4)) return -kMixMeisterMp4Advance;
+    if (d.size() >= 4 && (!std::memcmp(d.data(), "FORM", 4) || !std::memcmp(d.data(), "fLaC", 4))) return 0;
+    const Mp3Head h = mp3_head(d.data(), d.size());
+    // Core Audio (AVAudioFile) recorta como minimp3 con Xing/Info y LAME, y sin etiqueta descuenta
+    // además las 529 muestras del decodificador (medido: mismo primer tiempo en los dos primeros
+    // casos, 12 ms antes sin etiqueta).
+    const bool lame = (h.info || h.xing) && h.delay > 0;
+    return lame ? mixmeister_lead(h) : (h.info ? h.frame_samples : 0) + 529 - kMixMeisterMp3Advance;
 }
 
 void write_wav16(const std::string& path, const Buffer& b) {

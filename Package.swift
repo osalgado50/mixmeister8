@@ -17,7 +17,7 @@ let package = Package(
             sources: ["src", "capi/mmn_c.cpp", "capi/mmn_fx.cpp", "capi/mmn_loud.cpp"],
             publicHeadersPath: "capi/include",
             cxxSettings: [.headerSearchPath("include"), .headerSearchPath("third_party/minimp3")],
-            linkerSettings: [.linkedFramework("AudioToolbox"), .linkedFramework("CoreFoundation")]),
+            linkerSettings: [.linkedFramework("AudioToolbox"), .linkedFramework("CoreFoundation"), .linkedFramework("Accelerate")]),
         .executableTarget(
             name: "MixMeister8",
             dependencies: ["MMNEngine"],

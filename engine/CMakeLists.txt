@@ -20,7 +20,7 @@ add_library(mmn
 target_include_directories(mmn PUBLIC include PRIVATE third_party/minimp3)
 if(APPLE)
   # AAC/M4A y demás formatos del sistema vía Core Audio
-  target_link_libraries(mmn PRIVATE "-framework AudioToolbox" "-framework CoreFoundation")
+  target_link_libraries(mmn PRIVATE "-framework AudioToolbox" "-framework CoreFoundation" "-framework Accelerate")
 endif()
 if(MSVC)
   target_compile_options(mmn PRIVATE /W4)

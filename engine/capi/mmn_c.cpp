@@ -323,6 +323,10 @@ double mmn_audio_peaks3(const char* path, float* out, size_t bins, char** err) {
     }
 }
 
+long mmn_audio_mm_offset(const char* path) {
+    try { return mixmeister_offset_frames(path, true); } catch (...) { return 0; }
+}
+
 char* mmn_analyze_json(const char* path, char** err) {
     try {
         const Buffer b = read_audio(path);

@@ -43,6 +43,9 @@ final class MixGraph {
         let bass: [(t: Double, db: Double)], mid: [(t: Double, db: Double)], treble: [(t: Double, db: Double)]
         var fx: [FxSlot] = []
         let sync = Sync()
+        /// Muestras que hay que restar a una posición de la lista (línea de tiempo de MixMeister 7.8)
+        /// para leerla en el fichero con AVAudioFile (los MP3 difieren; ver Engine.mmOffset).
+        var lead: AVAudioFramePosition = 0
     }
     /// Sincronía del cambio de tempo. AUNewTimePitch avanza por saltos de entrada enteros de
     /// 4096/overlap muestras, así que la velocidad real es round(H·v)/H y una pista con el tempo
@@ -176,6 +179,7 @@ final class MixGraph {
             var c = Chain(index: item.index, file: file, item: item,
                           volume: env([MarkerKind.volume, MarkerKind.autoVolume, MarkerKind.autoVolumeIn]),
                           bass: env([MarkerKind.bass]), mid: env([MarkerKind.mid]), treble: env([MarkerKind.treble]))
+            c.lead = Engine.mmOffset(path, rate: file.processingFormat.sampleRate)
             c.fx = makeSlots(t.effects)
             Self.automation(t, c.fx)
             // ¿Suena siempre a su tempo y en su tono? Entonces no hace falta el cambio de tempo.
@@ -263,10 +267,14 @@ final class MixGraph {
                     startSrc = seg.srcStart + (accNow - seg.acc)
                     playerTime = 0
                 }
-                let a = AVAudioFramePosition(max(0, startSrc) * sr)
-                let e = min(c.file.length, AVAudioFramePosition(seg.srcEnd * sr))
+                // Posiciones de la lista → muestras del fichero según AVAudioFile (c.lead); si caen
+                // antes de su principio (la trama de silencio que el original sí cuenta), se espera.
+                var a = AVAudioFramePosition(max(0, startSrc) * sr) - c.lead
+                var at = max(0, playerTime)
+                if a < 0 { at += Double(-a) / sr; a = 0 }
+                let e = min(c.file.length, AVAudioFramePosition(seg.srcEnd * sr) - c.lead)
                 guard e > a else { continue }
-                let when = AVAudioTime(sampleTime: AVAudioFramePosition(max(0, playerTime) * sr), atRate: sr)
+                let when = AVAudioTime(sampleTime: AVAudioFramePosition(at * sr), atRate: sr)
                 c.player.scheduleSegment(c.file, startingFrame: a, frameCount: AVAudioFrameCount(e - a), at: when)
             }
         }

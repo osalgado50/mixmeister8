@@ -2,6 +2,7 @@
 #pragma once
 #include <complex>
 #include <cstddef>
+#include <memory>
 #include <span>
 #include <vector>
 
@@ -29,6 +30,8 @@ private:
     std::vector<std::size_t> rev_h_;   // permutación para n/2
     std::vector<cfloat> tw_h_;         // giros para n/2
     mutable std::vector<cfloat> scratch_;  // búfer de real_forward
+    struct Native;                         // en macOS, vDSP (Accelerate): la FFT del sistema
+    std::shared_ptr<Native> native_;
 };
 
 /// Ventana de Hann periódica.

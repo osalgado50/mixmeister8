@@ -132,7 +132,7 @@ enum TweakStore {
         default:
             n.mix_style = 0x11
             n.transition_out = t.transition_out == nil ? nil : (name == "Preset - Simple" ? "Simple Crossfade" : "No Transition")
-            let a = try? Engine.analyze(path: it.path)
+            let a = Engine.analyzeCached(path: it.path)
             let beat = 60 / (a?.bpm ?? max(1, it.bpm))
             let first = (a?.first_beat_s ?? 0) + (a?.first_sounding_beat ?? 0) * beat
             let len = Double(n.length_us ?? 0) * 1e-6

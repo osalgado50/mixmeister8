@@ -13,6 +13,8 @@ final class LibraryPane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSS
     private var rows: [LibraryItem] = []
     private var visible: [(key: String, width: CGFloat)] = []
     private let empty = label("La biblioteca de MixMeister aparecerá aquí.", size: 12, color: Theme.textDim)
+    private let progress = NSTextField(labelWithString: "")
+    private let stopAnalysis = ToolButton(symbol: "xmark.circle", tip: "Parar el análisis (sigue la próxima vez)", action: #selector(LibraryPane.cancelAnalysis), size: 11)
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -39,7 +41,12 @@ final class LibraryPane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSS
         search.font = Theme.font(11)
         search.delegate = self
         search.sendsSearchStringImmediately = true
-        let stack = NSStackView(views: [tabs, add, NSView(), category, search])
+        // Progreso del análisis de lo añadido (en segundo plano, como el original) y parar.
+        progress.font = Theme.font(10)
+        progress.textColor = Theme.textDim
+        progress.isHidden = true
+        stopAnalysis.isHidden = true
+        let stack = NSStackView(views: [tabs, add, progress, stopAnalysis, NSView(), category, search])
         stack.spacing = 8
         stack.edgeInsets = NSEdgeInsets(top: 0, left: 8, bottom: 0, right: 8)
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -89,11 +96,33 @@ final class LibraryPane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSS
         visible = Columns.layout(prefix: "Catalog", keys: Columns.libraryKeys, defaults: ["Title", "Artist", "Bpm", "Album", "Time", "Key", "KeyCode"])
         rebuildColumns()
         NotificationCenter.default.addObserver(self, selector: #selector(reload), name: .libraryChanged, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(showProgress), name: .libraryProgress, object: nil)
+        stopAnalysis.target = self
+        table.registerForDraggedTypes([.fileURL])
         NotificationCenter.default.addObserver(forName: .tweaksChanged, object: nil, queue: .main) { [weak self] _ in self?.table.reloadData() }
         NotificationCenter.default.addObserver(self, selector: #selector(referenceChanged), name: .selectionChanged, object: nil)
         reload()
     }
     required init?(coder: NSCoder) { fatalError() }
+
+    @objc private func showProgress() {
+        let L = Library8.shared
+        progress.isHidden = !L.isBusy
+        stopAnalysis.isHidden = !L.isBusy
+        progress.stringValue = L.isBusy ? "Analizando \(L.done + 1) de \(L.total)…" : ""
+    }
+    @objc func cancelAnalysis() { Library8.shared.cancel() }
+
+    // Arrastrar ficheros o carpetas desde el Finder: a la biblioteca (como el original).
+    func tableView(_ t: NSTableView, validateDrop info: NSDraggingInfo, proposedRow row: Int, proposedDropOperation op: NSTableView.DropOperation) -> NSDragOperation {
+        guard info.draggingSource == nil, info.draggingPasteboard.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) else { return [] }
+        t.setDropRow(-1, dropOperation: .on)
+        return .copy
+    }
+    func tableView(_ t: NSTableView, acceptDrop info: NSDraggingInfo, row: Int, dropOperation op: NSTableView.DropOperation) -> Bool {
+        let urls = info.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+        return Library8.shared.add(urls) > 0
+    }
 
     private func rebuildColumns() {
         for c in table.tableColumns { table.removeTableColumn(c) }

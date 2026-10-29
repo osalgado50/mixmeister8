@@ -24,6 +24,12 @@ struct Buffer {
 /// Lanza std::runtime_error si no puede.
 Buffer read_audio(const std::string& path);
 
+/// Muestras que hay que sumar a la línea de tiempo de un decodificador para estar en la de
+/// MixMeister 7.8 (donde están las marcas de sus listas y sus .mxm). `system_decoder`: el de
+/// Core Audio (AVAudioFile); si no, el de read_audio, que ya decodifica en la del original (→ 0).
+/// Solo los MP3 difieren (ver audio.cpp).
+long mixmeister_offset_frames(const std::string& path, bool system_decoder);
+
 /// Escribe WAV PCM de 16 bits con limitación a [-1, 1].
 void write_wav16(const std::string& path, const Buffer& b);
 

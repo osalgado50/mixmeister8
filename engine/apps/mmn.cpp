@@ -152,7 +152,15 @@ int cmd_compare(const char* audio, const char* mxm, bool tsv) {
 /// Diagnóstico de fase: para la rejilla con la fase de MixMeister (0) y desplazada medio
 /// tiempo (1), media por banda del ataque (flujo) y de la caída (nivel a +30 ms menos nivel
 /// a +150 ms). Una línea por fase: nombre, fase, nuestra_fase_coincide, 48 flujos, 48 caídas.
-int cmd_phasediag(const char* audio, const char* mxm) {
+double interp_at(const std::vector<float>& v, double x) {
+    if (v.empty() || x < 0) return 0;
+    const auto i = static_cast<std::size_t>(x);
+    if (i + 1 >= v.size()) return 0;
+    const double f = x - static_cast<double>(i);
+    return v[i] + f * (v[i + 1] - v[i]);
+}
+
+int cmd_phasediag(const char* audio, const char* mxm, bool quarters = false) {
     const Buffer b = read_audio(audio);
     const auto mono = to_mono(b);
     const RhythmAnalysis a = analyze_rhythm(mono, b.sample_rate);
@@ -179,13 +187,23 @@ int cmd_phasediag(const char* audio, const char* mxm) {
         if (f150 >= static_cast<long>(frames)) return 0.0;
         return B(f30) - B(f150);
     };
-    for (int ph = 0; ph < 2; ++ph) {
+    // phasediag: fase de MixMeister (0) y contratiempo (1). phasediag4: las cuatro posiciones a un
+    // cuarto de tiempo (0 = MixMeister); en vez de «ours» global, si nuestra rejilla cae en esa
+    // posición (±⅛ de tiempo), y además el pulso de bombo (√graves·banda) que usa la búsqueda.
+    const int nph = quarters ? 4 : 2;
+    for (int ph = 0; ph < nph; ++ph) {
         std::vector<double> fl(nb, 0), dc(nb, 0);
         long n = 0;
-        double t0 = std::fmod(t_mm + ph * P / 2, P);
-        for (double t = t0; t + 0.2 < e.duration(); t += P, ++n)
+        const double t0 = std::fmod(t_mm + ph * P / nph, P);
+        double kick = 0;
+        for (double t = t0; t + 0.2 < e.duration(); t += P, ++n) {
             for (std::size_t k = 0; k < nb; ++k) fl[k] += at(t, k, true), dc[k] += at(t, k, false);
-        std::printf("%s\t%d\t%.0f", base(audio).c_str(), ph, ours);
+            const double lo = interp_at(e.low, (t - e.low_offset_s) / e.hop_s), fu = interp_at(e.full, (t - e.offset_s) / e.hop_s);
+            kick += std::sqrt(std::max(0.0, lo * fu));
+        }
+        const double mine = quarters ? (std::abs(beat_offset(g, t0).first) < 0.125 ? 1 : 0) : ours;
+        std::printf("%s\t%d\t%.0f", base(audio).c_str(), ph, mine);
+        if (quarters) std::printf("\t%.5f", n ? kick / n : 0);
         for (auto v : fl) std::printf("\t%.4f", n ? v / n : 0);
         for (auto v : dc) std::printf("\t%.4f", n ? v / n : 0);
         std::puts("");
@@ -389,6 +407,7 @@ int main(int argc, char** argv) {
         if (c == "compare" && argc == 4) return cmd_compare(argv[2], argv[3], false);
         if (c == "tsv" && argc == 4) return cmd_compare(argv[2], argv[3], true);
         if (c == "phasediag" && argc == 4) return cmd_phasediag(argv[2], argv[3]);
+        if (c == "phasediag4" && argc == 4) return cmd_phasediag(argv[2], argv[3], true);
         if (c == "bardiag" && argc == 4) return cmd_bardiag(argv[2], argv[3]);
         if (c == "leveldiag" && argc == 4) return cmd_leveldiag(argv[2], argv[3]);
         if (c == "mixdiag" && argc == 4) return cmd_mixdiag(argv[2], argv[3]);
